@@ -1,5 +1,3 @@
-pytesseract
-pytesseract-ocr
-pytesseract-ocr-all
-
+tesseract-ocr
+tesseract-ocr-eng
 
