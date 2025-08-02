@@ -1,22 +1,9 @@
-# Core web framework
 streamlit>=1.28.0
-
-# Computer vision and image processing
-opencv-python>=4.8.0
-opencv-contrib-python>=4.8.0
-
-# Image processing libraries
+opencv-python-headless>=4.8.0
+pytesseract>=0.3.10
 Pillow>=10.0.0
 scikit-image>=0.21.0
 scipy>=1.11.0
-
-# OCR engine
-pytesseract>=0.3.10
-
-# Data manipulation and visualization
 numpy>=1.24.0
 pandas>=2.0.0
 matplotlib>=3.7.0
-
-# Encoding/decoding utilities
-base64
