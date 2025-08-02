@@ -1,6 +1,5 @@
 tesseract-ocr
 tesseract-ocr-eng
-pytesseract
-tesseract-ocr
+libtesseract-dev
 
 
