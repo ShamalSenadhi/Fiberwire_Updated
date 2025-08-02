@@ -1,5 +1,37 @@
 import streamlit as st
-import cv2
+import streamlit as st
+import sys
+
+# Check Python version
+st.sidebar.write(f"Python version: {sys.version}")
+
+# Try importing OpenCV with detailed error info
+try:
+    import cv2
+    st.sidebar.success(f"✅ OpenCV imported: {cv2.__version__}")
+except ImportError as e:
+    st.error("❌ OpenCV import failed!")
+    st.error(f"Error details: {str(e)}")
+    st.info("Please check that opencv-python-headless is in requirements.txt")
+    
+    # Try alternative import
+    try:
+        import subprocess
+        result = subprocess.run([sys.executable, "-c", "import cv2; print(cv2.__version__)"], 
+                              capture_output=True, text=True)
+        if result.returncode == 0:
+            st.success(f"OpenCV is actually available: {result.stdout}")
+        else:
+            st.error(f"OpenCV test failed: {result.stderr}")
+    except:
+        pass
+    
+    st.stop()
+
+# Continue with other imports only if OpenCV works
+import numpy as np
+from PIL import Image, ImageEnhance, ImageFilter
+# ... rest of your imports
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 import pytesseract
