@@ -1,14 +1,37 @@
 import streamlit as st
-import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
-import pytesseract
 import io
 import base64
-from scipy import ndimage
-from skimage import morphology, exposure, restoration, filters
 import matplotlib.pyplot as plt
 import pandas as pd
+
+# Try importing cv2 with fallback
+try:
+    import cv2
+    CV2_AVAILABLE = True
+except ImportError:
+    CV2_AVAILABLE = False
+    st.error("⚠️ OpenCV not available. Please add 'opencv-python-headless' to requirements.txt")
+
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+except ImportError:
+    TESSERACT_AVAILABLE = False
+    st.error("⚠️ Tesseract not available. Please add 'pytesseract' to requirements.txt")
+
+try:
+    from scipy import ndimage
+    from skimage import morphology, exposure, restoration, filters
+    SCIPY_AVAILABLE = True
+except ImportError:
+    SCIPY_AVAILABLE = False
+    st.error("⚠️ SciPy/scikit-image not available. Please add to requirements.txt")
+
+# Add this check at the start of your app
+if not CV2_AVAILABLE:
+    st.stop()
 
 # Configure page
 st.set_page_config(
