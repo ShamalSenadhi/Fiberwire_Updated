@@ -3,7 +3,10 @@ import subprocess, sys
 
 # Ensure cv2 is installed
 subprocess.check_call([sys.executable, "-m", "pip", "install", "opencv-python==4.8.1.78"])
+
 import cv2
+# …rest of your imports…
+
 import numpy as np
 import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
