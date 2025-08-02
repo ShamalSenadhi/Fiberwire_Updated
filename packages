@@ -1,14 +1,4 @@
-# Install all packages with pip:
-pip install streamlit opencv-python pytesseract Pillow scikit-image scipy numpy pandas matplotlib
-
-# Or install one by one:
-pip install streamlit
-pip install opencv-python
-pip install pytesseract
-pip install Pillow
-pip install scikit-image
-pip install scipy
-pip install numpy
-pip install pandas
-pip install matplotlib
-
+tesseract-ocr
+tesseract-ocr-eng
+libgl1-mesa-glx
+libglib2.0-0
