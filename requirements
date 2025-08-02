@@ -1,0 +1,186 @@
+# requirements.txt
+streamlit==1.28.0
+opencv-python-headless==4.8.1.78
+pillow==10.0.0
+pytesseract==0.3.10
+numpy==1.24.3
+scipy==1.11.1
+scikit-image==0.21.0
+matplotlib==3.7.1
+pandas==2.0.3
+
+# packages.txt (for Streamlit Cloud - system packages)
+tesseract-ocr
+tesseract-ocr-eng
+tesseract-ocr-all
+libtesseract-dev
+
+# Dockerfile (if using Docker deployment)
+FROM python:3.9-slim
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    tesseract-ocr-eng \
+    tesseract-ocr-all \
+    libtesseract-dev \
+    libgl1-mesa-glx \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    libgomp1 \
+    libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy application files
+COPY . .
+
+# Expose port
+EXPOSE 8501
+
+# Health check
+HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health
+
+# Run the application
+ENTRYPOINT ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+
+# docker-compose.yml (for Docker Compose deployment)
+version: '3.8'
+
+services:
+  ocr-app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      - STREAMLIT_SERVER_HEADLESS=true
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+    volumes:
+      - ./uploads:/app/uploads
+    restart: unless-stopped
+
+# .streamlit/config.toml (Streamlit configuration)
+[server]
+headless = true
+port = 8501
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f0f8ff"
+textColor = "#262730"
+
+# runtime.txt (for Heroku deployment)
+python-3.9.16
+
+# Procfile (for Heroku deployment)
+web: sh setup.sh && streamlit run app.py --server.port=$PORT --server.address=0.0.0.0
+
+# setup.sh (for Heroku deployment)
+#!/bin/bash
+
+mkdir -p ~/.streamlit/
+
+echo "\
+[server]\n\
+headless = true\n\
+port = $PORT\n\
+enableCORS = false\n\
+\n\
+[browser]\n\
+gatherUsageStats = false\n\
+" > ~/.streamlit/config.toml
+
+# Install tesseract
+apt-get update
+apt-get install -y tesseract-ocr tesseract-ocr-eng tesseract-ocr-all
+
+# netlify.toml (for Netlify deployment with serverless functions)
+[build]
+  command = "pip install -r requirements.txt"
+  functions = "netlify/functions"
+  publish = "dist"
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+# railway.json (for Railway deployment)
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "build": {
+    "builder": "NIXPACKS"
+  },
+  "deploy": {
+    "startCommand": "streamlit run app.py --server.port $PORT --server.address 0.0.0.0",
+    "healthcheckPath": "/_stcore/health",
+    "healthcheckTimeout": 100,
+    "restartPolicyType": "ON_FAILURE"
+  }
+}
+
+# vercel.json (for Vercel deployment - Note: Streamlit on Vercel requires workarounds)
+{
+  "version": 2,
+  "builds": [
+    {
+      "src": "app.py",
+      "use": "@vercel/python"
+    }
+  ],
+  "routes": [
+    {
+      "src": "/(.*)",
+      "dest": "app.py"
+    }
+  ]
+}
+
+# fly.toml (for Fly.io deployment)
+app = "enhanced-ocr-app"
+primary_region = "sjc"
+
+[build]
+
+[env]
+  PORT = "8501"
+
+[http_service]
+  internal_port = 8501
+  force_https = true
+  auto_stop_machines = true
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024
+
+# render.yaml (for Render deployment)
+services:
+  - type: web
+    name: enhanced-ocr-app
+    env: python
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "streamlit run app.py --server.port $PORT --server.address 0.0.0.0"
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.9.16
+    autoDeploy: false
