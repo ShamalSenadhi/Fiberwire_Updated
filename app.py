@@ -1,14 +1,35 @@
 import streamlit as st
-import pytesseract
-import cv2
-import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
 import io
 import base64
-from scipy import ndimage
-from skimage import morphology
 import tempfile
 import os
+
+# Handle imports with error checking
+try:
+    import pytesseract
+except ImportError:
+    st.error("❌ PyTesseract is not installed. Please check your requirements.txt file.")
+    st.stop()
+
+try:
+    import cv2
+    import numpy as np
+except ImportError:
+    st.error("❌ OpenCV or NumPy is not installed. Please check your requirements.txt file.")
+    st.stop()
+
+try:
+    from PIL import Image, ImageEnhance, ImageFilter
+except ImportError:
+    st.error("❌ Pillow is not installed. Please check your requirements.txt file.")
+    st.stop()
+
+try:
+    from scipy import ndimage
+    from skimage import morphology
+except ImportError:
+    st.error("❌ SciPy or scikit-image is not installed. Please check your requirements.txt file.")
+    st.stop()
 
 # Configure page
 st.set_page_config(
