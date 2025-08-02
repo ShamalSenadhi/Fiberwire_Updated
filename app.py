@@ -1,9 +1,25 @@
 import streamlit as st
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter, ImageOps
-import pytesseract
 import io
 import base64
+
+# Try to import pytesseract with error handling
+try:
+    import pytesseract
+    TESSERACT_AVAILABLE = True
+    # Try to set tesseract path for different environments
+    try:
+        pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
+    except:
+        pass
+except ImportError as e:
+    TESSERACT_AVAILABLE = False
+    st.error(f"❌ pytesseract import failed: {e}")
+    st.info("📋 Debug info: pytesseract module is not available")
+except Exception as e:
+    TESSERACT_AVAILABLE = False
+    st.error(f"❌ pytesseract error: {e}")
 
 # Set page config
 st.set_page_config(
@@ -158,6 +174,9 @@ def get_ocr_config(mode, language):
 
 def perform_ocr(img, ocr_mode, language):
     """Perform OCR on the image"""
+    if not TESSERACT_AVAILABLE:
+        return "❌ Tesseract not available"
+    
     try:
         config = get_ocr_config(ocr_mode, language)
         text = pytesseract.image_to_string(img, config=config)
@@ -168,6 +187,9 @@ def perform_ocr(img, ocr_mode, language):
 
 def multiple_preprocessing_ocr(img, ocr_mode, language):
     """Try OCR with multiple preprocessing approaches"""
+    if not TESSERACT_AVAILABLE:
+        return ["❌ Tesseract not available"]
+    
     results = []
     
     try:
@@ -219,6 +241,9 @@ def multiple_preprocessing_ocr(img, ocr_mode, language):
 
 def multiple_ocr_modes(img, language):
     """Try multiple OCR modes"""
+    if not TESSERACT_AVAILABLE:
+        return ["❌ Tesseract not available"]
+    
     results = []
     
     # Priority modes for different content types
@@ -241,6 +266,40 @@ def multiple_ocr_modes(img, language):
 # Main Streamlit App
 def main():
     st.markdown('<h1 class="main-header">🔧 Enhanced OCR Extractor (Streamlit Cloud Compatible)</h1>', unsafe_allow_html=True)
+    
+    # Check tesseract availability first
+    if not TESSERACT_AVAILABLE:
+        st.error("❌ **Tesseract OCR is not available!**")
+        st.markdown("""
+        **To fix this issue:**
+        
+        1. Make sure your `requirements.txt` contains:
+        ```
+        streamlit>=1.28.0
+        pytesseract==0.3.10
+        Pillow>=9.0.0
+        numpy>=1.21.0
+        ```
+        
+        2. Make sure your `packages.txt` contains:
+        ```
+        tesseract-ocr
+        tesseract-ocr-eng
+        libtesseract-dev
+        ```
+        
+        3. Both files should be in your **repo root directory**
+        4. Commit and push both files to GitHub
+        5. Wait for Streamlit Cloud to redeploy
+        
+        If it still doesn't work, try:
+        - Clear cache in Streamlit Cloud (⋮ menu → Clear cache)
+        - Restart the app
+        - Check the deployment logs for specific errors
+        """)
+        st.stop()
+    
+    st.success("✅ Tesseract OCR is available!")
     
     # Sidebar configuration
     st.sidebar.header("🎨 Configuration")
