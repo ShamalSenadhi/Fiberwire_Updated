@@ -1,11 +1,4 @@
-tesseract-ocr
 pytesseract
-tesseract-ocr-eng
-tesseract-ocr-ara
-tesseract-ocr-chi-sim
-tesseract-ocr-fra
-tesseract-ocr-deu
-tesseract-ocr-spa
-tesseract-ocr-rus
-libgl1-mesa-glx
-libglib2.0-0
+tesseract-ocr
+
+
