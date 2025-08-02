@@ -1,7 +1,7 @@
 streamlit>=1.25.0
 streamlit-drawable-canvas>=0.10.0
 numpy>=1.24.0
-opencv-python-headless>=4.7.0       # ← this line installs cv2
+opencv-python>=4.7.0           # ← ensure this is here
 Pillow>=9.0.0
 pytesseract>=0.3.10
 scikit-image>=0.20.0
