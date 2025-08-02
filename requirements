@@ -1,6 +1,27 @@
-streamlit
-easyocr
-torch==1.13.1+cpu
-torchvision==0.14.1+cpu
-opencv-python
+# Core Streamlit and Web Framework
+streamlit>=1.28.0
 
+# OCR Engine
+easyocr>=1.7.0
+
+# Computer Vision and Image Processing
+opencv-python>=4.8.0
+opencv-contrib-python>=4.8.0
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# Scientific Computing and Image Enhancement
+scipy>=1.11.0
+scikit-image>=0.21.0
+
+# Plotting and Visualization
+matplotlib>=3.7.0
+plotly>=5.15.0
+
+# Additional Dependencies for EasyOCR
+torch>=2.0.0
+torchvision>=0.15.0
+Pillow>=8.2.0
+
+# Optional: For better performance
+# numba>=0.57.0
