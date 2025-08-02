@@ -7,6 +7,22 @@ import os
 # Handle imports with error checking
 try:
     import pytesseract
+    # Configure tesseract path for different environments
+    import shutil
+    tesseract_path = shutil.which('tesseract')
+    if tesseract_path:
+        pytesseract.pytesseract.tesseract_cmd = tesseract_path
+    else:
+        # Try common paths
+        possible_paths = [
+            '/usr/bin/tesseract',
+            '/usr/local/bin/tesseract',
+            '/opt/homebrew/bin/tesseract'
+        ]
+        for path in possible_paths:
+            if os.path.exists(path):
+                pytesseract.pytesseract.tesseract_cmd = path
+                break
 except ImportError:
     st.error("❌ PyTesseract is not installed. Please check your requirements.txt file.")
     st.stop()
@@ -30,6 +46,50 @@ try:
 except ImportError:
     st.error("❌ SciPy or scikit-image is not installed. Please check your requirements.txt file.")
     st.stop()
+
+def check_tesseract_installation():
+    """Check if tesseract is properly installed and configured"""
+    try:
+        version = pytesseract.get_tesseract_version()
+        return True, f"Tesseract version: {version}"
+    except Exception as e:
+        return False, f"Tesseract error: {str(e)}"
+
+def check_system_status():
+    """Display system status for debugging"""
+    with st.expander("🔧 System Status (Click to expand)"):
+        # Check Python packages
+        st.write("**Python Packages:**")
+        packages = {
+            'pytesseract': pytesseract.__version__ if 'pytesseract' in globals() else 'Not found',
+            'cv2': cv2.__version__ if 'cv2' in globals() else 'Not found',
+            'numpy': np.__version__ if 'np' in globals() else 'Not found',
+            'PIL': Image.__version__ if 'Image' in globals() else 'Not found'
+        }
+        for pkg, version in packages.items():
+            st.write(f"- {pkg}: {version}")
+        
+        # Check tesseract
+        st.write("**Tesseract OCR:**")
+        is_working, message = check_tesseract_installation()
+        if is_working:
+            st.success(message)
+            # Try to get available languages
+            try:
+                langs = pytesseract.get_languages()
+                st.write(f"Available languages: {', '.join(langs)}")
+            except:
+                st.warning("Could not retrieve available languages")
+        else:
+            st.error(message)
+            st.write("Tesseract command path:", getattr(pytesseract.pytesseract, 'tesseract_cmd', 'Not set'))
+        
+        # Check OpenCV
+        st.write("**OpenCV:**")
+        try:
+            st.success(f"OpenCV build info available: {len(cv2.getBuildInformation()) > 0}")
+        except:
+            st.error("OpenCV build info not available")
 
 # Configure page
 st.set_page_config(
@@ -188,6 +248,9 @@ if 'extracted_text' not in st.session_state:
 
 # Header
 st.markdown("<h1 class='main-header'>✍️ Handwriting & Text OCR Extractor</h1>", unsafe_allow_html=True)
+
+# Add system status check
+check_system_status()
 
 # Sidebar controls
 st.sidebar.header("🔧 OCR Settings")
