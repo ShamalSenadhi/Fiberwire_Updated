@@ -1,474 +1,451 @@
 import streamlit as st
+import easyocr
+import cv2
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+from PIL import Image, ImageEnhance, ImageFilter
 import io
 import base64
+from scipy import ndimage
+from skimage import morphology, exposure, restoration, filters
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.widgets import RectangleSelector
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
-# Try to import pytesseract with error handling
-try:
-    import pytesseract
-    TESSERACT_AVAILABLE = True
-    # Try to set tesseract path for different environments
-    try:
-        pytesseract.pytesseract.tesseract_cmd = '/usr/bin/tesseract'
-    except:
-        pass
-except ImportError as e:
-    TESSERACT_AVAILABLE = False
-    st.error(f"❌ pytesseract import failed: {e}")
-    st.info("📋 Debug info: pytesseract module is not available")
-except Exception as e:
-    TESSERACT_AVAILABLE = False
-    st.error(f"❌ pytesseract error: {e}")
-
-# Set page config
+# Configure Streamlit page
 st.set_page_config(
-    page_title="Enhanced OCR Extractor",
+    page_title="🔧 Enhanced OCR Extractor",
     page_icon="🔧",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .enhancement-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffeaa7;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 1rem 0;
-    }
-    .result-box {
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 1rem 0;
-        font-family: monospace;
-        white-space: pre-wrap;
-        max-height: 300px;
-        overflow-y: auto;
-    }
-    .tips-box {
-        background-color: #e3f2fd;
-        border-left: 4px solid #2196f3;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 0 10px 10px 0;
-    }
-</style>
-""", unsafe_allow_html=True)
+# Initialize EasyOCR reader (cached for performance)
+@st.cache_resource
+def load_ocr_reader(languages=['en']):
+    """Initialize EasyOCR reader with specified languages"""
+    return easyocr.Reader(languages, gpu=False)
 
-def basic_image_enhancement(img, method='auto_adaptive'):
-    """Apply basic enhancement methods using PIL only"""
-    
-    # Convert to grayscale if not already
-    if img.mode != 'L':
-        gray_img = img.convert('L')
+def advanced_image_enhancement(img, method='auto_adaptive'):
+    """Apply advanced enhancement methods to generate improved image"""
+    # Convert PIL to OpenCV format
+    if isinstance(img, Image.Image):
+        cv_img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
     else:
-        gray_img = img.copy()
+        cv_img = img
     
-    if method == 'high_contrast':
-        # Enhance contrast using PIL
-        enhancer = ImageEnhance.Contrast(gray_img)
-        enhanced = enhancer.enhance(2.0)
-        return enhanced.convert('RGB')
-    
-    elif method == 'sharpening':
-        # Apply sharpening filter
-        enhanced = gray_img.filter(ImageFilter.SHARPEN)
-        # Additional unsharp mask
-        enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
-        return enhanced.convert('RGB')
-    
-    elif method == 'brightness_contrast':
-        # Enhance both brightness and contrast
-        enhancer = ImageEnhance.Brightness(gray_img)
-        enhanced = enhancer.enhance(1.2)
-        enhancer = ImageEnhance.Contrast(enhanced)
-        enhanced = enhancer.enhance(1.5)
-        return enhanced.convert('RGB')
-    
-    elif method == 'edge_enhance':
-        # Edge enhancement
-        enhanced = gray_img.filter(ImageFilter.EDGE_ENHANCE_MORE)
-        return enhanced.convert('RGB')
-    
-    elif method == 'smooth_sharpen':
-        # Smooth then sharpen
-        enhanced = gray_img.filter(ImageFilter.SMOOTH)
-        enhanced = enhanced.filter(ImageFilter.SHARPEN)
-        return enhanced.convert('RGB')
-    
-    elif method == 'threshold_binary':
-        # Simple thresholding
-        img_array = np.array(gray_img)
-        threshold = np.mean(img_array)
-        binary = np.where(img_array > threshold, 255, 0)
-        result_img = Image.fromarray(binary.astype(np.uint8), mode='L')
-        return result_img.convert('RGB')
-    
+    gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+
+    if method == 'number_optimized':
+        # Specialized enhancement for number recognition
+        denoised = cv2.fastNlMeansDenoising(gray, h=12)
+        clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(6,6))
+        enhanced = clahe.apply(denoised)
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+        cleaned = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+        smoothed = cv2.bilateralFilter(cleaned, 9, 80, 80)
+        binary = cv2.adaptiveThreshold(smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+        result = cv2.dilate(binary, kernel_dilate, iterations=1)
+
+    elif method == 'measurement_enhanced':
+        # For measurements like "12.51m", "3.4kg", etc.
+        denoised = cv2.fastNlMeansDenoising(gray, h=10)
+        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4,4))
+        enhanced = clahe.apply(denoised)
+        kernel_sharp = np.array([[0,-1,0], [-1,5,-1], [0,-1,0]])
+        sharpened = cv2.filter2D(enhanced, -1, kernel_sharp)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        result = cv2.morphologyEx(sharpened, cv2.MORPH_OPEN, kernel)
+
+    elif method == 'digit_sharpening':
+        # For digital/printed numbers with maximum sharpness
+        denoised = cv2.fastNlMeansDenoising(gray, h=8)
+        gaussian = cv2.GaussianBlur(denoised, (0, 0), 1.5)
+        unsharp = cv2.addWeighted(denoised, 2.0, gaussian, -1.0, 0)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(unsharp)
+        laplacian = cv2.Laplacian(enhanced, cv2.CV_64F, ksize=3)
+        laplacian = np.uint8(np.absolute(laplacian))
+        result = cv2.addWeighted(enhanced, 0.9, laplacian, 0.1, 0)
+
     elif method == 'auto_adaptive':
-        # Comprehensive enhancement using PIL
-        # First enhance contrast
-        enhancer = ImageEnhance.Contrast(gray_img)
-        enhanced = enhancer.enhance(1.5)
-        
-        # Then enhance sharpness
-        enhancer = ImageEnhance.Sharpness(enhanced)
-        enhanced = enhancer.enhance(1.8)
-        
-        # Apply slight smoothing to reduce noise
-        enhanced = enhanced.filter(ImageFilter.SMOOTH_MORE)
-        
-        # Final sharpening
-        enhanced = enhanced.filter(ImageFilter.UnsharpMask(radius=1, percent=120, threshold=2))
-        
-        return enhanced.convert('RGB')
-    
-    elif method == 'invert_enhance':
-        # Invert and enhance (good for dark text on light background)
-        inverted = ImageOps.invert(gray_img)
-        enhancer = ImageEnhance.Contrast(inverted)
-        enhanced = enhancer.enhance(2.0)
-        return enhanced.convert('RGB')
-    
+        # Comprehensive adaptive enhancement
+        denoised = cv2.fastNlMeansDenoising(gray, h=10)
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(denoised)
+        smoothed = cv2.bilateralFilter(enhanced, 9, 75, 75)
+        gaussian = cv2.GaussianBlur(smoothed, (0, 0), 2.0)
+        result = cv2.addWeighted(smoothed, 1.5, gaussian, -0.5, 0)
+
+    elif method == 'handwriting_optimized':
+        # Specifically for handwriting
+        denoised = cv2.fastNlMeansDenoising(gray, h=8)
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(6,6))
+        enhanced = clahe.apply(denoised)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        closed = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+        kernel_sharp = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
+        result = cv2.filter2D(closed, -1, kernel_sharp)
+
+    elif method == 'high_contrast':
+        # Maximum contrast enhancement
+        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(gray)
+        gamma = 0.8
+        lookup_table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+        result = cv2.LUT(enhanced, lookup_table)
+
+    elif method == 'noise_reduction':
+        # Advanced noise reduction
+        denoised1 = cv2.fastNlMeansDenoising(gray, h=10)
+        denoised2 = cv2.bilateralFilter(denoised1, 9, 80, 80)
+        result = cv2.medianBlur(denoised2, 3)
+
+    elif method == 'edge_sharpening':
+        # Edge enhancement and sharpening
+        laplacian = cv2.Laplacian(gray, cv2.CV_64F)
+        laplacian = np.uint8(np.absolute(laplacian))
+        result = cv2.addWeighted(gray, 0.8, laplacian, 0.2, 0)
+
+    elif method == 'brightness_contrast':
+        alpha = 1.3  # Contrast control
+        beta = 20    # Brightness control
+        result = cv2.convertScaleAbs(gray, alpha=alpha, beta=beta)
+
+    elif method == 'histogram_equalization':
+        result = cv2.equalizeHist(gray)
+
+    elif method == 'unsharp_masking':
+        gaussian = cv2.GaussianBlur(gray, (0, 0), 2.0)
+        result = cv2.addWeighted(gray, 1.8, gaussian, -0.8, 0)
+
+    elif method == 'morphological':
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        opened = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel)
+        result = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
+
+    elif method == 'wiener_deconvolution':
+        # Wiener deconvolution for blur removal
+        try:
+            from skimage import restoration
+            psf = np.ones((5, 5)) / 25
+            result_float = restoration.wiener(gray, psf, balance=0.1)
+            result = (result_float * 255).astype(np.uint8)
+        except:
+            result = gray
+
     else:
-        # Default: just convert to RGB
-        return gray_img.convert('RGB')
+        result = gray
 
-def get_ocr_config(mode, language):
-    """Get OCR configuration based on mode"""
-    
-    # Character sets for different types
-    basic_numbers = '0123456789'
-    decimal_numbers = '0123456789.,'
-    measurement_chars = '0123456789.,-+()[]{}mkcglbftinMKCGLBFTIN°%'
-    scientific_chars = '0123456789.,-+eE()[]{}x×*'
-    currency_chars = '0123456789.,$€£¥₹₽¢₩₪₦₨₱₡₲₴₵₸₹'
-    coordinate_chars = '0123456789.,-+°′″NSEW'
-    alphanumeric = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz.,+-=()[]{}/"\'';
+    # Convert back to RGB
+    if len(result.shape) == 2:
+        result_rgb = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
+    else:
+        result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
 
-    configs = {
-        'numbers_only': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={basic_numbers}',
-        'decimal_numbers': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={decimal_numbers}',
-        'measurements': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={measurement_chars}',
-        'scientific': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={scientific_chars}',
-        'currency': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={currency_chars}',
-        'coordinates': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={coordinate_chars}',
-        'single_word': f'--oem 3 --psm 8 -l {language}',
-        'single_char': f'--oem 3 --psm 10 -l {language}',
-        'line_of_text': f'--oem 3 --psm 7 -l {language}',
-        'mixed_text': f'--oem 3 --psm 6 -l {language}',
-        'full_page': f'--oem 3 --psm 3 -l {language}',
-        'alphanumeric': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={alphanumeric}'
+    return Image.fromarray(result_rgb)
+
+def get_easyocr_settings(mode, languages):
+    """Get EasyOCR settings based on mode"""
+    settings = {
+        'allowlist': None,
+        'blocklist': None,
+        'width_ths': 0.7,
+        'height_ths': 0.7,
+        'paragraph': False
     }
-    return configs.get(mode, configs['decimal_numbers'])
-
-def perform_ocr(img, ocr_mode, language):
-    """Perform OCR on the image"""
-    if not TESSERACT_AVAILABLE:
-        return "❌ Tesseract not available"
     
+    if mode in ['numbers_precise', 'measurements', 'scientific_notation', 'currency', 'coordinates']:
+        settings['allowlist'] = '0123456789.,-+()[]{}mkcglbftinMKCGLBFTIN°%$€£¥₹eE×x*'
+        settings['paragraph'] = False
+        
+    elif mode == 'handwriting':
+        settings['paragraph'] = True
+        
+    return settings
+
+def crop_image(image, x1, y1, x2, y2):
+    """Crop image based on coordinates"""
+    # Ensure coordinates are within image bounds
+    height, width = image.shape[:2] if len(image.shape) == 3 else (image.size[1], image.size[0])
+    
+    x1, x2 = max(0, min(x1, x2)), min(width, max(x1, x2))
+    y1, y2 = max(0, min(y1, y2)), min(height, max(y1, y2))
+    
+    if isinstance(image, Image.Image):
+        return image.crop((x1, y1, x2, y2))
+    else:
+        return image[y1:y2, x1:x2]
+
+def perform_ocr(image, reader, mode='auto', languages=['en']):
+    """Perform OCR using EasyOCR"""
     try:
-        config = get_ocr_config(ocr_mode, language)
-        text = pytesseract.image_to_string(img, config=config)
-        return text.strip()
+        # Convert PIL to numpy array if needed
+        if isinstance(image, Image.Image):
+            img_array = np.array(image)
+        else:
+            img_array = image
+            
+        # Get settings for the mode
+        settings = get_easyocr_settings(mode, languages)
+        
+        # Perform OCR
+        results = reader.readtext(img_array, **settings)
+        
+        # Extract text
+        extracted_text = []
+        for (bbox, text, confidence) in results:
+            if confidence > 0.3:  # Filter low confidence results
+                extracted_text.append(text)
+                
+        return ' '.join(extracted_text), results
+        
     except Exception as e:
         st.error(f"OCR Error: {str(e)}")
-        return ""
+        return "", []
 
-def multiple_preprocessing_ocr(img, ocr_mode, language):
-    """Try OCR with multiple preprocessing approaches"""
-    if not TESSERACT_AVAILABLE:
-        return ["❌ Tesseract not available"]
-    
-    results = []
-    
-    try:
-        # Original image
-        config = get_ocr_config(ocr_mode, language)
-        text = pytesseract.image_to_string(img, config=config).strip()
-        if text:
-            results.append(f"[Original] {text}")
-        
-        # Convert to grayscale
-        gray_img = img.convert('L')
-        text = pytesseract.image_to_string(gray_img, config=config).strip()
-        if text and f"[Grayscale] {text}" not in results:
-            results.append(f"[Grayscale] {text}")
-        
-        # Try with threshold
-        img_array = np.array(gray_img)
-        threshold = np.mean(img_array)
-        binary = np.where(img_array > threshold, 255, 0)
-        binary_img = Image.fromarray(binary.astype(np.uint8), mode='L')
-        text = pytesseract.image_to_string(binary_img, config=config).strip()
-        if text and f"[Threshold] {text}" not in results:
-            results.append(f"[Threshold] {text}")
-        
-        # Try with inverted colors
-        try:
-            inverted = ImageOps.invert(gray_img)
-            text = pytesseract.image_to_string(inverted, config=config).strip()
-            if text and f"[Inverted] {text}" not in results:
-                results.append(f"[Inverted] {text}")
-        except:
-            pass
-        
-        # Try with scaling
-        try:
-            width, height = img.size
-            # Scale up 2x
-            scaled_img = img.resize((width*2, height*2), Image.LANCZOS)
-            text = pytesseract.image_to_string(scaled_img, config=config).strip()
-            if text and f"[Scaled_2x] {text}" not in results:
-                results.append(f"[Scaled_2x] {text}")
-        except:
-            pass
-            
-    except Exception as e:
-        st.error(f"Preprocessing OCR Error: {str(e)}")
-    
-    return results
-
-def multiple_ocr_modes(img, language):
-    """Try multiple OCR modes"""
-    if not TESSERACT_AVAILABLE:
-        return ["❌ Tesseract not available"]
-    
-    results = []
-    
-    # Priority modes for different content types
-    modes = [
-        'decimal_numbers', 'numbers_only', 'measurements', 
-        'scientific', 'currency', 'coordinates',
-        'single_word', 'line_of_text', 'mixed_text', 'alphanumeric'
-    ]
-    
-    for mode in modes:
-        try:
-            text = perform_ocr(img, mode, language)
-            if text and f"[{mode}] {text}" not in results:
-                results.append(f"[{mode}] {text}")
-        except:
-            continue
-    
-    return results
-
-# Main Streamlit App
 def main():
-    st.markdown('<h1 class="main-header">🔧 Enhanced OCR Extractor (Streamlit Cloud Compatible)</h1>', unsafe_allow_html=True)
+    st.title("🔧 Enhanced Image OCR Extractor")
+    st.markdown("**Powered by EasyOCR with Advanced Image Enhancement**")
     
-    # Check tesseract availability first
-    if not TESSERACT_AVAILABLE:
-        st.error("❌ **Tesseract OCR is not available!**")
-        st.markdown("""
-        **To fix this issue:**
+    # Sidebar controls
+    with st.sidebar:
+        st.header("🎨 Enhancement Settings")
         
-        1. Make sure your `requirements.txt` contains:
-        ```
-        streamlit>=1.28.0
-        pytesseract==0.3.10
-        Pillow>=9.0.0
-        numpy>=1.21.0
-        ```
+        enhancement_method = st.selectbox(
+            "Choose Enhancement Method",
+            options=[
+                'number_optimized', 'measurement_enhanced', 'digit_sharpening',
+                'auto_adaptive', 'handwriting_optimized', 'high_contrast',
+                'noise_reduction', 'edge_sharpening', 'brightness_contrast',
+                'histogram_equalization', 'unsharp_masking', 'morphological',
+                'wiener_deconvolution'
+            ],
+            format_func=lambda x: {
+                'number_optimized': '🔢 Number Recognition Optimized',
+                'measurement_enhanced': '📏 Measurement Text Enhanced',
+                'digit_sharpening': '🎯 Digital/Printed Numbers',
+                'auto_adaptive': '🤖 Auto Adaptive Enhancement',
+                'handwriting_optimized': '✍️ Handwriting Optimized',
+                'high_contrast': '⚡ High Contrast Boost',
+                'noise_reduction': '🧹 Advanced Noise Reduction',
+                'edge_sharpening': '📐 Edge Sharpening',
+                'brightness_contrast': '💡 Brightness & Contrast',
+                'histogram_equalization': '📊 Histogram Equalization',
+                'unsharp_masking': '🔍 Unsharp Masking',
+                'morphological': '🔄 Morphological Enhancement',
+                'wiener_deconvolution': '🌟 Wiener Deconvolution'
+            }[x],
+            index=0
+        )
         
-        2. Make sure your `packages.txt` contains:
-        ```
-        tesseract-ocr
-        tesseract-ocr-eng
-        libtesseract-dev
-        ```
+        st.header("🔍 OCR Settings")
         
-        3. Both files should be in your **repo root directory**
-        4. Commit and push both files to GitHub
-        5. Wait for Streamlit Cloud to redeploy
+        ocr_mode = st.selectbox(
+            "OCR Mode",
+            options=[
+                'numbers_precise', 'measurements', 'scientific_notation',
+                'currency', 'coordinates', 'handwriting', 'print', 'mixed'
+            ],
+            format_func=lambda x: {
+                'numbers_precise': '🔢 Precise Number Recognition',
+                'measurements': '📏 Measurements (12.51m, 3.4kg, etc.)',
+                'scientific_notation': '🧪 Scientific Numbers',
+                'currency': '💰 Currency & Financial',
+                'coordinates': '🗺️ Coordinates & GPS',
+                'handwriting': '📝 Handwriting Optimized',
+                'print': '🖨️ Printed Text',
+                'mixed': '🔀 Mixed Text'
+            }[x],
+            index=0
+        )
         
-        If it still doesn't work, try:
-        - Clear cache in Streamlit Cloud (⋮ menu → Clear cache)
-        - Restart the app
-        - Check the deployment logs for specific errors
-        """)
-        st.stop()
-    
-    st.success("✅ Tesseract OCR is available!")
-    
-    # Sidebar configuration
-    st.sidebar.header("🎨 Configuration")
-    
-    # Enhancement method selection
-    enhancement_method = st.sidebar.selectbox(
-        "Enhancement Method",
-        [
-            "auto_adaptive", "high_contrast", "sharpening", 
-            "brightness_contrast", "edge_enhance", "smooth_sharpen",
-            "threshold_binary", "invert_enhance"
-        ],
-        index=0,
-        help="Choose the best enhancement method for your image type"
-    )
-    
-    # OCR mode selection
-    ocr_mode = st.sidebar.selectbox(
-        "OCR Mode",
-        [
-            "decimal_numbers", "numbers_only", "measurements", 
-            "scientific", "currency", "coordinates",
-            "single_word", "single_char", "line_of_text", 
-            "mixed_text", "full_page", "alphanumeric"
-        ],
-        index=0,
-        help="Choose the OCR mode optimized for your content type"
-    )
-    
-    # Language selection
-    language = st.sidebar.selectbox(
-        "Language",
-        ["eng", "eng+ara", "eng+chi_sim", "eng+fra", "eng+deu", "eng+spa", "eng+rus"],
-        index=0,
-        help="Select the language(s) for OCR"
-    )
-    
-    # Additional options
-    st.sidebar.subheader("📋 Options")
-    use_multiple_preprocessing = st.sidebar.checkbox("Multiple Preprocessing", value=True)
-    show_confidence = st.sidebar.checkbox("Show All Results", value=True)
+        languages = st.multiselect(
+            "Languages",
+            options=['en', 'fr', 'de', 'es', 'zh', 'ja', 'ko', 'ar', 'hi', 'ru'],
+            default=['en'],
+            help="Select languages for OCR recognition"
+        )
     
     # File upload
     uploaded_file = st.file_uploader(
-        "Upload an image", 
+        "Upload an image",
         type=['png', 'jpg', 'jpeg', 'bmp', 'tiff'],
-        help="Upload an image containing text or numbers you want to extract"
+        help="Upload an image file for OCR processing"
     )
     
     if uploaded_file is not None:
-        # Load original image
-        original_img = Image.open(uploaded_file)
+        # Load and display original image
+        original_image = Image.open(uploaded_file)
         
         col1, col2 = st.columns(2)
         
         with col1:
             st.subheader("📷 Original Image")
-            st.image(original_img, caption="Original Image", use_column_width=True)
+            st.image(original_image, use_column_width=True)
+            st.info(f"Size: {original_image.size[0]}×{original_image.size[1]} pixels")
         
-        # Enhancement step
-        st.markdown('<div class="enhancement-box">', unsafe_allow_html=True)
-        st.subheader("🎨 Step 1: Image Enhancement")
+        # Generate enhanced image
+        if st.button("🚀 Generate Enhanced Image", type="primary"):
+            with st.spinner("Enhancing image..."):
+                enhanced_image = advanced_image_enhancement(original_image, enhancement_method)
+                st.session_state.enhanced_image = enhanced_image
+                st.session_state.original_image = original_image
         
-        if st.button("🚀 Enhance & Process", type="primary"):
-            with st.spinner("Processing image..."):
-                try:
-                    # Enhance image
-                    enhanced_img = basic_image_enhancement(original_img, enhancement_method)
-                    st.session_state.enhanced_img = enhanced_img
-                    st.session_state.enhancement_method = enhancement_method
-                    
-                    with col2:
-                        st.subheader("✨ Enhanced Image")
-                        st.image(enhanced_img, caption=f"Enhanced ({enhancement_method})", use_column_width=True)
-                    
-                    st.success(f"✅ Image enhanced using: {enhancement_method}")
-                    
-                    # Perform OCR
-                    st.subheader("🔍 Step 2: OCR Results")
-                    
-                    if use_multiple_preprocessing:
-                        # Try multiple preprocessing methods
-                        results = multiple_preprocessing_ocr(enhanced_img, ocr_mode, language)
-                        if results:
-                            st.success(f"Found {len(results)} results with different preprocessing methods:")
-                            for i, result in enumerate(results, 1):
-                                st.write(f"{i}. {result}")
-                            
-                            # Show best result
-                            clean_results = [r.split('] ')[1] for r in results if '] ' in r]
-                            if clean_results:
-                                best_result = max(clean_results, key=len) if len(set(clean_results)) > 1 else clean_results[0]
-                                st.markdown(f"### 🎯 Best Result: `{best_result}`")
-                                
-                                if st.button("📋 Copy Best Result"):
-                                    st.code(best_result, language="text")
-                        else:
-                            st.warning("No text detected with preprocessing methods")
-                    
-                    # Try multiple OCR modes
-                    if show_confidence:
-                        st.subheader("🔄 Multiple OCR Modes")
-                        with st.spinner("Trying different OCR modes..."):
-                            mode_results = multiple_ocr_modes(enhanced_img, language)
-                            if mode_results:
-                                with st.expander("View All Mode Results", expanded=False):
-                                    for result in mode_results:
-                                        st.text(result)
-                                
-                                # Get unique results
-                                unique_results = list(set([r.split('] ')[1] for r in mode_results if '] ' in r and r.split('] ')[1].strip()]))
-                                if unique_results:
-                                    st.write("**Unique results across all modes:**")
-                                    for i, result in enumerate(unique_results, 1):
-                                        st.write(f"{i}. `{result}`")
-                                    
-                                    # Best overall result
-                                    overall_best = max(unique_results, key=len)
-                                    st.success(f"🏆 **Overall Best:** `{overall_best}`")
-                            else:
-                                st.info("No additional results from different OCR modes")
+        # Display enhanced image if available
+        if 'enhanced_image' in st.session_state:
+            with col2:
+                st.subheader("✨ Enhanced Image")
+                st.image(st.session_state.enhanced_image, use_column_width=True)
+                st.success(f"Enhanced using: {enhancement_method}")
+            
+            # OCR Processing section
+            st.header("🔍 OCR Processing")
+            
+            # Initialize OCR reader
+            with st.spinner("Loading OCR model..."):
+                reader = load_ocr_reader(languages)
+            
+            # Create tabs for different processing options
+            tab1, tab2, tab3 = st.tabs(["📄 Full Image OCR", "✂️ Crop & Extract", "🔄 Multiple Attempts"])
+            
+            with tab1:
+                st.subheader("Process Full Enhanced Image")
+                if st.button("🔍 Extract Text from Full Image"):
+                    with st.spinner("Performing OCR on full image..."):
+                        extracted_text, results = perform_ocr(
+                            st.session_state.enhanced_image, 
+                            reader, 
+                            ocr_mode, 
+                            languages
+                        )
                         
-                except Exception as e:
-                    st.error(f"Processing error: {str(e)}")
-                    st.info("Trying with original image...")
-                    try:
-                        # Fallback to original image
-                        result = perform_ocr(original_img, ocr_mode, language)
-                        if result:
-                            st.success(f"Fallback result: `{result}`")
+                        if extracted_text:
+                            st.success("✅ Text Extracted Successfully!")
+                            st.text_area("Extracted Text:", extracted_text, height=150)
+                            
+                            # Display confidence scores
+                            if results:
+                                st.subheader("📊 Detection Results")
+                                for i, (bbox, text, confidence) in enumerate(results):
+                                    st.write(f"**Text {i+1}:** {text} (Confidence: {confidence:.2f})")
                         else:
-                            st.warning("No text detected")
-                    except Exception as e2:
-                        st.error(f"Fallback also failed: {str(e2)}")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
+                            st.warning("No text detected in the image.")
+            
+            with tab2:
+                st.subheader("Crop Selection for Targeted OCR")
+                st.info("Use the sliders below to define a crop area, then extract text from that region.")
+                
+                # Get image dimensions
+                img_width, img_height = st.session_state.enhanced_image.size
+                
+                # Crop controls
+                col_x1, col_y1, col_x2, col_y2 = st.columns(4)
+                
+                with col_x1:
+                    x1 = st.slider("Left (X1)", 0, img_width, 0)
+                with col_y1:
+                    y1 = st.slider("Top (Y1)", 0, img_height, 0)
+                with col_x2:
+                    x2 = st.slider("Right (X2)", 0, img_width, img_width)
+                with col_y2:
+                    y2 = st.slider("Bottom (Y2)", 0, img_height, img_height)
+                
+                # Show crop preview
+                if x2 > x1 and y2 > y1:
+                    cropped_image = crop_image(st.session_state.enhanced_image, x1, y1, x2, y2)
+                    st.image(cropped_image, caption=f"Crop Preview ({x2-x1}×{y2-y1} pixels)")
+                    
+                    if st.button("✍️ Extract Text from Selection"):
+                        with st.spinner("Performing OCR on selected area..."):
+                            extracted_text, results = perform_ocr(
+                                cropped_image, 
+                                reader, 
+                                ocr_mode, 
+                                languages
+                            )
+                            
+                            if extracted_text:
+                                st.success("✅ Text Extracted from Selection!")
+                                st.text_area("Extracted Text:", extracted_text, height=100)
+                            else:
+                                st.warning("No text detected in the selected area.")
+            
+            with tab3:
+                st.subheader("Multiple OCR Attempts")
+                st.info("Try different enhancement and OCR combinations for better results.")
+                
+                if st.button("🔄 Run Multiple Attempts"):
+                    methods = ['number_optimized', 'auto_adaptive', 'high_contrast', 'handwriting_optimized']
+                    modes = ['numbers_precise', 'measurements', 'handwriting', 'mixed']
+                    
+                    results_data = []
+                    
+                    progress_bar = st.progress(0)
+                    total_attempts = len(methods) * len(modes)
+                    attempt = 0
+                    
+                    for method in methods:
+                        enhanced_img = advanced_image_enhancement(original_image, method)
+                        
+                        for mode in modes:
+                            attempt += 1
+                            progress_bar.progress(attempt / total_attempts)
+                            
+                            try:
+                                text, ocr_results = perform_ocr(enhanced_img, reader, mode, languages)
+                                if text.strip():
+                                    results_data.append({
+                                        'Enhancement': method,
+                                        'OCR Mode': mode,
+                                        'Text': text.strip(),
+                                        'Length': len(text.strip())
+                                    })
+                            except:
+                                continue
+                    
+                    progress_bar.empty()
+                    
+                    if results_data:
+                        st.success(f"✅ Found {len(results_data)} valid results!")
+                        
+                        # Display results
+                        for i, result in enumerate(results_data, 1):
+                            with st.expander(f"Result {i}: {result['Enhancement']} + {result['OCR Mode']} ({result['Length']} chars)"):
+                                st.code(result['Text'])
+                        
+                        # Find best result (longest text)
+                        best_result = max(results_data, key=lambda x: x['Length'])
+                        st.subheader("🎯 Best Result:")
+                        st.success(f"**Method:** {best_result['Enhancement']} + {best_result['OCR Mode']}")
+                        st.text_area("Best Extracted Text:", best_result['Text'], height=100)
+                    else:
+                        st.warning("No text detected with any combination.")
     
     # Tips and information
-    st.markdown('<div class="tips-box">', unsafe_allow_html=True)
-    st.subheader("💡 Tips for Better Results")
-    
-    st.markdown("""
-    **This version is optimized for Streamlit Cloud compatibility:**
-    
-    **For Number Recognition:**
-    - **Pure Numbers:** Use "numbers_only" mode for just digits (0-9)
-    - **Decimal Numbers:** Use "decimal_numbers" for numbers with decimals
-    - **Measurements:** Use "measurements" for "12.51m", "3.4kg", etc.
-    - **Scientific:** Use "scientific" for "1.5e-3", "2.4×10⁵", etc.
-    - **Currency:** Use "currency" for "$123.45", "€99.99", etc.
-    
-    **Enhancement Methods:**
-    - **auto_adaptive:** Best general-purpose enhancement
-    - **high_contrast:** For faded or low-contrast text
-    - **sharpening:** For blurry text
-    - **threshold_binary:** For very clear black/white text
-    - **invert_enhance:** For white text on dark background
-    
-    **General Tips:**
-    - Enable "Multiple Preprocessing" for automatic optimization
-    - Try different enhancement methods if first attempt fails
-    - The app will show the best result automatically
-    - Images with clear, high-contrast text work best
-    """)
-    
-    st.markdown('</div>', unsafe_allow_html=True)
-    
-    # System requirements
-    st.info("📝 **Compatible with Streamlit Cloud** - Only requires: `pytesseract`, `Pillow`, and `numpy`")
+    with st.expander("💡 Tips for Better Results"):
+        st.markdown("""
+        ### 🎯 Best Practices for Number Recognition:
+        - **Pure Numbers:** Use "Number Recognition Optimized" enhancement + "Precise Number Recognition" OCR
+        - **Measurements:** Use "Measurement Text Enhanced" + "Measurements" mode for "12.51m", "3.4kg", etc.
+        - **Digital Displays:** Use "Digital/Printed Numbers" enhancement for LCD/LED numbers
+        - **Scientific Numbers:** Use "Scientific Numbers" mode for "1.5e-3", "2×10⁵", etc.
+        
+        ### 🎨 Enhancement Method Guide:
+        - **Auto Adaptive:** Best overall results for mixed content
+        - **Handwriting Optimized:** Specifically for handwritten text
+        - **High Contrast Boost:** For faded or low-contrast images
+        - **Noise Reduction:** For noisy/grainy images
+        - **Edge Sharpening:** For blurry text
+        
+        ### 🔍 OCR Tips:
+        - Try cropping to focus on specific text areas
+        - Use multiple attempts to test different combinations
+        - Select appropriate languages for better recognition
+        - Compare original vs enhanced images to see improvement
+        """)
 
 if __name__ == "__main__":
     main()
