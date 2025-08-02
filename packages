@@ -1,3 +1,12 @@
+streamlit
 easyocr
-python3-opencv
-
+opencv-python
+opencv-contrib-python
+Pillow
+numpy
+scipy
+scikit-image
+matplotlib
+plotly
+torch
+torchvision
