@@ -1,10 +1,11 @@
 import streamlit as st
-import easyocr
 import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 import io
 import base64
+import requests
+import json
 
 # Configure Streamlit page
 st.set_page_config(
@@ -14,15 +15,75 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Initialize EasyOCR reader (cached for performance)
+def check_dependencies():
+    """Check and display dependency status"""
+    dependencies = {
+        'opencv-python': ('cv2', 'Computer Vision operations'),
+        'pillow': ('PIL', 'Image processing'),
+        'numpy': ('numpy', 'Numerical operations'),
+        'requests': ('requests', 'API calls')
+    }
+    
+    missing = []
+    available = []
+    
+    for package, (module, description) in dependencies.items():
+        try:
+            __import__(module)
+            available.append(f"✅ {package} - {description}")
+        except ImportError:
+            missing.append(f"❌ {package} - {description}")
+    
+    return available, missing
+
+def install_easyocr_instructions():
+    """Display installation instructions for EasyOCR"""
+    st.error("🚨 EasyOCR is not installed!")
+    
+    with st.expander("📦 Installation Instructions", expanded=True):
+        st.markdown("""
+        ### Option 1: Install EasyOCR (Recommended)
+        ```bash
+        pip install easyocr
+        ```
+        
+        ### Option 2: Install with all dependencies
+        ```bash
+        pip install easyocr opencv-python pillow torch torchvision
+        ```
+        
+        ### Option 3: For Conda users
+        ```bash
+        conda install -c conda-forge easyocr
+        ```
+        
+        ### If you're on Streamlit Cloud:
+        Add `easyocr` to your `requirements.txt` file.
+        
+        **Note:** EasyOCR requires PyTorch, which might take a few minutes to install.
+        """)
+
+def try_import_easyocr():
+    """Try to import EasyOCR with helpful error messages"""
+    try:
+        import easyocr
+        return easyocr, None
+    except ImportError as e:
+        return None, str(e)
+
+# Try to import EasyOCR
+easyocr_module, import_error = try_import_easyocr()
+
 @st.cache_resource
 def load_ocr_reader(languages=['en']):
     """Initialize EasyOCR reader with specified languages"""
+    if easyocr_module is None:
+        return None
+    
     try:
-        return easyocr.Reader(languages, gpu=False)
+        return easyocr_module.Reader(languages, gpu=False)
     except Exception as e:
         st.error(f"Error loading OCR reader: {str(e)}")
-        st.info("Make sure you have installed: pip install easyocr")
         return None
 
 def advanced_image_enhancement(img, method='auto_adaptive'):
@@ -180,7 +241,7 @@ def crop_image(image, x1, y1, x2, y2):
 def perform_ocr(image, reader, mode='auto', languages=['en']):
     """Perform OCR using EasyOCR"""
     if reader is None:
-        return "OCR reader not loaded", []
+        return "❌ OCR reader not available. Please install EasyOCR.", []
     
     try:
         # Convert PIL to numpy array if needed
@@ -209,23 +270,49 @@ def perform_ocr(image, reader, mode='auto', languages=['en']):
         st.error(f"OCR Error: {str(e)}")
         return "", []
 
+def simple_ocr_fallback(image):
+    """Simple OCR fallback using basic image processing"""
+    st.warning("🔄 Using fallback OCR method (limited functionality)")
+    
+    try:
+        # Convert to grayscale and apply basic preprocessing
+        if isinstance(image, Image.Image):
+            gray = image.convert('L')
+        else:
+            gray = cv2.cvtColor(image, cv2.COLOR_RGB2GRAY)
+            gray = Image.fromarray(gray)
+        
+        # Apply some basic enhancements
+        enhancer = ImageEnhance.Contrast(gray)
+        enhanced = enhancer.enhance(2.0)
+        
+        # This is a placeholder - in a real scenario, you'd use
+        # Tesseract or another OCR engine
+        return "⚠️ Install EasyOCR for full OCR functionality", []
+        
+    except Exception as e:
+        return f"Fallback OCR error: {str(e)}", []
+
 def main():
     st.title("🔧 Enhanced Image OCR Extractor")
     st.markdown("**Powered by EasyOCR with Advanced Image Enhancement**")
     
     # Check dependencies
-    try:
-        import easyocr
-        import cv2
-    except ImportError as e:
-        st.error(f"Missing dependencies: {str(e)}")
-        st.info("""
-        Please install required packages:
-        ```
-        pip install easyocr opencv-python pillow streamlit
-        ```
-        """)
-        return
+    available_deps, missing_deps = check_dependencies()
+    
+    # Show dependency status
+    with st.expander("📦 Dependency Status"):
+        for dep in available_deps:
+            st.markdown(dep)
+        for dep in missing_deps:
+            st.markdown(dep)
+    
+    # Check EasyOCR availability
+    if easyocr_module is None:
+        install_easyocr_instructions()
+        st.info("⚠️ You can still use the image enhancement features without EasyOCR!")
+    else:
+        st.success("✅ EasyOCR is available!")
     
     # Sidebar controls
     with st.sidebar:
@@ -256,43 +343,44 @@ def main():
             index=0
         )
         
-        st.header("🔍 OCR Settings")
-        
-        ocr_mode = st.selectbox(
-            "OCR Mode",
-            options=[
-                'auto', 'numbers_precise', 'measurements', 'scientific_notation',
-                'currency', 'coordinates', 'handwriting', 'print', 'mixed'
-            ],
-            format_func=lambda x: {
-                'auto': '🔄 Auto Detection',
-                'numbers_precise': '🔢 Precise Number Recognition',
-                'measurements': '📏 Measurements (12.51m, 3.4kg, etc.)',
-                'scientific_notation': '🧪 Scientific Numbers',
-                'currency': '💰 Currency & Financial',
-                'coordinates': '🗺️ Coordinates & GPS',
-                'handwriting': '📝 Handwriting Optimized',
-                'print': '🖨️ Printed Text',
-                'mixed': '🔀 Mixed Text'
-            }[x],
-            index=0
-        )
-        
-        languages = st.multiselect(
-            "Languages",
-            options=['en', 'fr', 'de', 'es', 'zh', 'ja', 'ko', 'ar', 'hi', 'ru'],
-            default=['en'],
-            help="Select languages for OCR recognition"
-        )
-        
-        confidence_threshold = st.slider(
-            "Confidence Threshold",
-            min_value=0.1,
-            max_value=1.0,
-            value=0.3,
-            step=0.1,
-            help="Minimum confidence for text detection"
-        )
+        if easyocr_module is not None:
+            st.header("🔍 OCR Settings")
+            
+            ocr_mode = st.selectbox(
+                "OCR Mode",
+                options=[
+                    'auto', 'numbers_precise', 'measurements', 'scientific_notation',
+                    'currency', 'coordinates', 'handwriting', 'print', 'mixed'
+                ],
+                format_func=lambda x: {
+                    'auto': '🔄 Auto Detection',
+                    'numbers_precise': '🔢 Precise Number Recognition',
+                    'measurements': '📏 Measurements (12.51m, 3.4kg, etc.)',
+                    'scientific_notation': '🧪 Scientific Numbers',
+                    'currency': '💰 Currency & Financial',
+                    'coordinates': '🗺️ Coordinates & GPS',
+                    'handwriting': '📝 Handwriting Optimized',
+                    'print': '🖨️ Printed Text',
+                    'mixed': '🔀 Mixed Text'
+                }[x],
+                index=0
+            )
+            
+            languages = st.multiselect(
+                "Languages",
+                options=['en', 'fr', 'de', 'es', 'zh', 'ja', 'ko', 'ar', 'hi', 'ru'],
+                default=['en'],
+                help="Select languages for OCR recognition"
+            )
+            
+            confidence_threshold = st.slider(
+                "Confidence Threshold",
+                min_value=0.1,
+                max_value=1.0,
+                value=0.3,
+                step=0.1,
+                help="Minimum confidence for text detection"
+            )
     
     # File upload
     uploaded_file = st.file_uploader(
@@ -319,7 +407,7 @@ def main():
                     enhanced_image = advanced_image_enhancement(original_image, enhancement_method)
                     st.session_state.enhanced_image = enhanced_image
                     st.session_state.original_image = original_image
-                    st.success("Image enhanced successfully!")
+                    st.success("✅ Image enhanced successfully!")
             
             # Display enhanced image if available
             if 'enhanced_image' in st.session_state:
@@ -331,146 +419,192 @@ def main():
                 # OCR Processing section
                 st.header("🔍 OCR Processing")
                 
-                # Initialize OCR reader
-                with st.spinner("Loading OCR model..."):
-                    reader = load_ocr_reader(languages)
-                
-                if reader is not None:
-                    # Create tabs for different processing options
-                    tab1, tab2, tab3 = st.tabs(["📄 Full Image OCR", "✂️ Crop & Extract", "🔄 Multiple Attempts"])
+                if easyocr_module is not None:
+                    # Initialize OCR reader
+                    with st.spinner("Loading OCR model..."):
+                        reader = load_ocr_reader(languages)
                     
-                    with tab1:
-                        st.subheader("Process Full Enhanced Image")
-                        if st.button("🔍 Extract Text from Full Image"):
-                            with st.spinner("Performing OCR on full image..."):
-                                extracted_text, results = perform_ocr(
-                                    st.session_state.enhanced_image, 
-                                    reader, 
-                                    ocr_mode, 
-                                    languages
-                                )
-                                
-                                if extracted_text:
-                                    st.success("✅ Text Extracted Successfully!")
-                                    st.text_area("Extracted Text:", extracted_text, height=150)
-                                    
-                                    # Display confidence scores
-                                    if results:
-                                        st.subheader("📊 Detection Results")
-                                        for i, (bbox, text, confidence) in enumerate(results):
-                                            if confidence > confidence_threshold:
-                                                st.write(f"**Text {i+1}:** {text} (Confidence: {confidence:.2f})")
-                                else:
-                                    st.warning("No text detected in the image.")
-                    
-                    with tab2:
-                        st.subheader("Crop Selection for Targeted OCR")
-                        st.info("Use the sliders below to define a crop area, then extract text from that region.")
+                    if reader is not None:
+                        # Create tabs for different processing options
+                        tab1, tab2, tab3 = st.tabs(["📄 Full Image OCR", "✂️ Crop & Extract", "🔄 Multiple Attempts"])
                         
-                        # Get image dimensions
-                        img_width, img_height = st.session_state.enhanced_image.size
-                        
-                        # Crop controls
-                        col_x1, col_y1, col_x2, col_y2 = st.columns(4)
-                        
-                        with col_x1:
-                            x1 = st.slider("Left (X1)", 0, img_width, 0, key="x1")
-                        with col_y1:
-                            y1 = st.slider("Top (Y1)", 0, img_height, 0, key="y1")
-                        with col_x2:
-                            x2 = st.slider("Right (X2)", 0, img_width, img_width, key="x2")
-                        with col_y2:
-                            y2 = st.slider("Bottom (Y2)", 0, img_height, img_height, key="y2")
-                        
-                        # Show crop preview
-                        if x2 > x1 and y2 > y1:
-                            cropped_image = crop_image(st.session_state.enhanced_image, x1, y1, x2, y2)
-                            st.image(cropped_image, caption=f"Crop Preview ({x2-x1}×{y2-y1} pixels)")
-                            
-                            if st.button("✍️ Extract Text from Selection"):
-                                with st.spinner("Performing OCR on selected area..."):
+                        with tab1:
+                            st.subheader("Process Full Enhanced Image")
+                            if st.button("🔍 Extract Text from Full Image"):
+                                with st.spinner("Performing OCR on full image..."):
                                     extracted_text, results = perform_ocr(
-                                        cropped_image, 
+                                        st.session_state.enhanced_image, 
                                         reader, 
                                         ocr_mode, 
                                         languages
                                     )
                                     
-                                    if extracted_text:
-                                        st.success("✅ Text Extracted from Selection!")
-                                        st.text_area("Extracted Text:", extracted_text, height=100, key="crop_text")
+                                    if extracted_text and not extracted_text.startswith("❌"):
+                                        st.success("✅ Text Extracted Successfully!")
+                                        st.text_area("Extracted Text:", extracted_text, height=150)
                                         
                                         # Display confidence scores
                                         if results:
+                                            st.subheader("📊 Detection Results")
                                             for i, (bbox, text, confidence) in enumerate(results):
                                                 if confidence > confidence_threshold:
                                                     st.write(f"**Text {i+1}:** {text} (Confidence: {confidence:.2f})")
                                     else:
-                                        st.warning("No text detected in the selected area.")
-                    
-                    with tab3:
-                        st.subheader("Multiple OCR Attempts")
-                        st.info("Try different enhancement and OCR combinations for better results.")
+                                        st.warning("No text detected in the image.")
+                                        if extracted_text.startswith("❌"):
+                                            st.error(extracted_text)
                         
-                        if st.button("🔄 Run Multiple Attempts"):
-                            methods = ['auto_adaptive', 'number_optimized', 'high_contrast', 'handwriting_optimized']
-                            modes = ['auto', 'numbers_precise', 'measurements', 'handwriting']
+                        with tab2:
+                            st.subheader("Crop Selection for Targeted OCR")
+                            st.info("Use the sliders below to define a crop area, then extract text from that region.")
                             
-                            results_data = []
+                            # Get image dimensions
+                            img_width, img_height = st.session_state.enhanced_image.size
                             
-                            progress_bar = st.progress(0)
-                            total_attempts = len(methods) * len(modes)
-                            attempt = 0
+                            # Crop controls
+                            col_x1, col_y1, col_x2, col_y2 = st.columns(4)
                             
-                            for method in methods:
-                                enhanced_img = advanced_image_enhancement(original_image, method)
+                            with col_x1:
+                                x1 = st.slider("Left (X1)", 0, img_width, 0, key="x1")
+                            with col_y1:
+                                y1 = st.slider("Top (Y1)", 0, img_height, 0, key="y1")
+                            with col_x2:
+                                x2 = st.slider("Right (X2)", 0, img_width, img_width, key="x2")
+                            with col_y2:
+                                y2 = st.slider("Bottom (Y2)", 0, img_height, img_height, key="y2")
+                            
+                            # Show crop preview
+                            if x2 > x1 and y2 > y1:
+                                cropped_image = crop_image(st.session_state.enhanced_image, x1, y1, x2, y2)
+                                st.image(cropped_image, caption=f"Crop Preview ({x2-x1}×{y2-y1} pixels)")
                                 
-                                for mode in modes:
-                                    attempt += 1
-                                    progress_bar.progress(attempt / total_attempts)
+                                if st.button("✍️ Extract Text from Selection"):
+                                    with st.spinner("Performing OCR on selected area..."):
+                                        extracted_text, results = perform_ocr(
+                                            cropped_image, 
+                                            reader, 
+                                            ocr_mode, 
+                                            languages
+                                        )
+                                        
+                                        if extracted_text and not extracted_text.startswith("❌"):
+                                            st.success("✅ Text Extracted from Selection!")
+                                            st.text_area("Extracted Text:", extracted_text, height=100, key="crop_text")
+                                            
+                                            # Display confidence scores
+                                            if results:
+                                                for i, (bbox, text, confidence) in enumerate(results):
+                                                    if confidence > confidence_threshold:
+                                                        st.write(f"**Text {i+1}:** {text} (Confidence: {confidence:.2f})")
+                                        else:
+                                            st.warning("No text detected in the selected area.")
+                        
+                        with tab3:
+                            st.subheader("Multiple OCR Attempts")
+                            st.info("Try different enhancement and OCR combinations for better results.")
+                            
+                            if st.button("🔄 Run Multiple Attempts"):
+                                methods = ['auto_adaptive', 'number_optimized', 'high_contrast', 'handwriting_optimized']
+                                modes = ['auto', 'numbers_precise', 'measurements', 'handwriting']
+                                
+                                results_data = []
+                                
+                                progress_bar = st.progress(0)
+                                total_attempts = len(methods) * len(modes)
+                                attempt = 0
+                                
+                                for method in methods:
+                                    enhanced_img = advanced_image_enhancement(original_image, method)
                                     
-                                    try:
-                                        text, ocr_results = perform_ocr(enhanced_img, reader, mode, languages)
-                                        if text.strip():
-                                            results_data.append({
-                                                'Enhancement': method,
-                                                'OCR Mode': mode,
-                                                'Text': text.strip(),
-                                                'Length': len(text.strip()),
-                                                'Words': len(text.strip().split())
-                                            })
-                                    except Exception as e:
-                                        continue
-                            
-                            progress_bar.empty()
-                            
-                            if results_data:
-                                st.success(f"✅ Found {len(results_data)} valid results!")
+                                    for mode in modes:
+                                        attempt += 1
+                                        progress_bar.progress(attempt / total_attempts)
+                                        
+                                        try:
+                                            text, ocr_results = perform_ocr(enhanced_img, reader, mode, languages)
+                                            if text.strip() and not text.startswith("❌"):
+                                                results_data.append({
+                                                    'Enhancement': method,
+                                                    'OCR Mode': mode,
+                                                    'Text': text.strip(),
+                                                    'Length': len(text.strip()),
+                                                    'Words': len(text.strip().split())
+                                                })
+                                        except Exception as e:
+                                            continue
                                 
-                                # Sort by length (longer is usually better)
-                                results_data.sort(key=lambda x: x['Length'], reverse=True)
+                                progress_bar.empty()
                                 
-                                # Display results
-                                for i, result in enumerate(results_data, 1):
-                                    with st.expander(f"Result {i}: {result['Enhancement']} + {result['OCR Mode']} ({result['Words']} words)"):
-                                        st.code(result['Text'])
-                                
-                                # Show best result
-                                best_result = results_data[0]
-                                st.subheader("🎯 Best Result:")
-                                st.success(f"**Method:** {best_result['Enhancement']} + {best_result['OCR Mode']}")
-                                st.text_area("Best Extracted Text:", best_result['Text'], height=100, key="best_text")
-                            else:
-                                st.warning("No text detected with any combination.")
+                                if results_data:
+                                    st.success(f"✅ Found {len(results_data)} valid results!")
+                                    
+                                    # Sort by length (longer is usually better)
+                                    results_data.sort(key=lambda x: x['Length'], reverse=True)
+                                    
+                                    # Display results
+                                    for i, result in enumerate(results_data, 1):
+                                        with st.expander(f"Result {i}: {result['Enhancement']} + {result['OCR Mode']} ({result['Words']} words)"):
+                                            st.code(result['Text'])
+                                    
+                                    # Show best result
+                                    best_result = results_data[0]
+                                    st.subheader("🎯 Best Result:")
+                                    st.success(f"**Method:** {best_result['Enhancement']} + {best_result['OCR Mode']}")
+                                    st.text_area("Best Extracted Text:", best_result['Text'], height=100, key="best_text")
+                                else:
+                                    st.warning("No text detected with any combination.")
+                    else:
+                        st.error("Failed to load OCR reader.")
                 else:
-                    st.error("Failed to load OCR reader. Please check your EasyOCR installation.")
+                    # Show fallback options when EasyOCR is not available
+                    st.warning("⚠️ EasyOCR not available. Image enhancement is still functional!")
+                    
+                    tab1, tab2 = st.tabs(["🖼️ Enhanced Image Download", "📝 Manual Text Entry"])
+                    
+                    with tab1:
+                        st.subheader("Download Enhanced Image")
+                        st.info("You can download the enhanced image and use it with other OCR tools.")
+                        
+                        # Convert PIL image to bytes for download
+                        buf = io.BytesIO()
+                        st.session_state.enhanced_image.save(buf, format='PNG')
+                        buf.seek(0)
+                        
+                        st.download_button(
+                            label="📥 Download Enhanced Image",
+                            data=buf.getvalue(),
+                            file_name=f"enhanced_{uploaded_file.name}",
+                            mime="image/png"
+                        )
+                    
+                    with tab2:
+                        st.subheader("Manual Text Entry")
+                        st.info("You can manually type the text you see in the enhanced image.")
+                        
+                        manual_text = st.text_area(
+                            "Enter text from the image:",
+                            height=150,
+                            placeholder="Type the text you can see in the enhanced image..."
+                        )
+                        
+                        if manual_text:
+                            st.success(f"✅ Entered {len(manual_text)} characters")
         
         except Exception as e:
             st.error(f"Error processing image: {str(e)}")
     
-    # Tips and information
-    with st.expander("💡 Tips for Better Results"):
+    # Installation and tips
+    with st.expander("💡 Installation & Tips"):
         st.markdown("""
+        ### 📦 Quick Installation
+        ```bash
+        # Install EasyOCR (recommended)
+        pip install easyocr
+        
+        # Or install all dependencies at once
+        pip install easyocr opencv-python pillow streamlit numpy
+        ```
+        
         ### 🎯 Best Practices for Number Recognition:
         - **Pure Numbers:** Use "Number Recognition Optimized" enhancement + "Precise Number Recognition" OCR
         - **Measurements:** Use "Measurement Text Enhanced" + "Measurements" mode for "12.51m", "3.4kg", etc.
@@ -491,15 +625,16 @@ def main():
         - Adjust confidence threshold based on your needs
         - Compare original vs enhanced images to see improvement
         
-        ### 📦 Installation Requirements:
-        ```bash
-        pip install streamlit easyocr opencv-python pillow numpy
-        ```
+        ### 🚨 Troubleshooting:
+        - If EasyOCR installation fails, try: `pip install --upgrade pip` first
+        - On Windows, you might need Visual Studio Build Tools
+        - On Linux, install: `sudo apt-get install python3-dev`
+        - For M1 Macs, use: `conda install easyocr -c conda-forge`
         """)
 
     # Footer
     st.markdown("---")
-    st.markdown("Built with ❤️ using Streamlit and EasyOCR")
+    st.markdown("Built with ❤️ using Streamlit, OpenCV, and EasyOCR")
 
 if __name__ == "__main__":
     main()
