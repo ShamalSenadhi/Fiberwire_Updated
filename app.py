@@ -64,7 +64,7 @@ def advanced_number_enhancement(img, method='precision_numbers'):
         smoothed = cv2.edgePreservingFilter(enhanced, flags=2, sigma_s=50, sigma_r=0.4)
         
         # Adaptive thresholding
-        result = cv2.adaptiveThreshold(smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        result = cv2.adaptiveThreshold(smoothed.astype(np.uint8), 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
         
     elif method == 'meter_scale':
         # Specialized for measurement scales and rulers
@@ -105,7 +105,7 @@ def advanced_number_enhancement(img, method='precision_numbers'):
         normalized = cv2.normalize(sharpened, None, 0, 255, cv2.NORM_MINMAX)
         
         # Adaptive threshold
-        result = cv2.adaptiveThreshold(normalized, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
+        result = cv2.adaptiveThreshold(normalized.astype(np.uint8), 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
     
     # Convert back to RGB
     if len(result.shape) == 2:
