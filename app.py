@@ -317,223 +317,42 @@ def multi_attempt_ocr(img, language='eng'):
         st.error(f"Multi-attempt error: {str(e)}")
         return [], []
 
-def image_to_base64(image):
-    """Convert PIL image to base64 string"""
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
-
-def create_image_selector(image_b64, img_width, img_height):
-    """Create HTML/JS image selector component"""
+def create_crop_interface():
+    """Create a simpler, more reliable crop interface using Streamlit widgets"""
+    if st.session_state.enhanced_image is None:
+        return None, None, None, None
     
-    html_code = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-        <style>
-            .image-container {{
-                position: relative;
-                display: inline-block;
-                border: 2px solid #ddd;
-                border-radius: 8px;
-                margin: 10px 0;
-            }}
-            
-            .selectable-image {{
-                display: block;
-                max-width: 800px;
-                height: auto;
-                cursor: crosshair;
-            }}
-            
-            .selection-overlay {{
-                position: absolute;
-                border: 2px dashed #ff4444;
-                background-color: rgba(255, 68, 68, 0.1);
-                pointer-events: none;
-                display: none;
-            }}
-            
-            .controls {{
-                margin-top: 10px;
-                padding: 10px;
-                background-color: #f8f9fa;
-                border-radius: 5px;
-                display: flex;
-                gap: 10px;
-                align-items: center;
-                flex-wrap: wrap;
-            }}
-            
-            .btn {{
-                padding: 8px 16px;
-                border: none;
-                border-radius: 4px;
-                cursor: pointer;
-                font-weight: bold;
-                transition: background-color 0.3s;
-            }}
-            
-            .btn-primary {{ background-color: #007bff; color: white; }}
-            .btn-primary:hover {{ background-color: #0056b3; }}
-            .btn-secondary {{ background-color: #6c757d; color: white; }}
-            .btn-secondary:hover {{ background-color: #545b62; }}
-            .btn-success {{ background-color: #28a745; color: white; }}
-            .btn-success:hover {{ background-color: #1e7e34; }}
-            
-            .selection-info {{
-                font-family: monospace;
-                font-size: 12px;
-                color: #666;
-                padding: 5px 10px;
-                background-color: #e9ecef;
-                border-radius: 3px;
-            }}
-            
-            .instructions {{
-                margin-bottom: 10px;
-                padding: 10px;
-                background-color: #e3f2fd;
-                border-left: 4px solid #2196f3;
-                border-radius: 0 5px 5px 0;
-                font-size: 14px;
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="instructions">
-            📐 <strong>How to select:</strong> Click and drag on the image to select the text area you want to extract. You can make multiple selections and extract each one.
-        </div>
-        
-        <div class="image-container">
-            <img id="selectableImage" src="{image_b64}" class="selectable-image" alt="Enhanced Image">
-            <div id="selectionOverlay" class="selection-overlay"></div>
-        </div>
-        
-        <div class="controls">
-            <button id="clearBtn" class="btn btn-secondary">🗑️ Clear Selection</button>
-            <button id="extractBtn" class="btn btn-primary" disabled>✍️ Extract Selection</button>
-            <div id="selectionInfo" class="selection-info">No selection made</div>
-        </div>
-        
-        <script>
-            const image = document.getElementById('selectableImage');
-            const overlay = document.getElementById('selectionOverlay');
-            const clearBtn = document.getElementById('clearBtn');
-            const extractBtn = document.getElementById('extractBtn');
-            const selectionInfo = document.getElementById('selectionInfo');
-            
-            let isSelecting = false;
-            let startX, startY, currentSelection = null;
-            
-            function getImageCoordinates(e) {{
-                const rect = image.getBoundingClientRect();
-                const scaleX = image.naturalWidth / image.clientWidth;
-                const scaleY = image.naturalHeight / image.clientHeight;
-                
-                return {{
-                    x: Math.round((e.clientX - rect.left) * scaleX),
-                    y: Math.round((e.clientY - rect.top) * scaleY),
-                    displayX: e.clientX - rect.left,
-                    displayY: e.clientY - rect.top
-                }};
-            }}
-            
-            image.addEventListener('mousedown', (e) => {{
-                isSelecting = true;
-                const coords = getImageCoordinates(e);
-                startX = coords.displayX;
-                startY = coords.displayY;
-                
-                overlay.style.left = startX + 'px';
-                overlay.style.top = startY + 'px';
-                overlay.style.width = '0px';
-                overlay.style.height = '0px';
-                overlay.style.display = 'block';
-                
-                e.preventDefault();
-            }});
-            
-            image.addEventListener('mousemove', (e) => {{
-                if (!isSelecting) return;
-                
-                const coords = getImageCoordinates(e);
-                const width = coords.displayX - startX;
-                const height = coords.displayY - startY;
-                
-                overlay.style.width = Math.abs(width) + 'px';
-                overlay.style.height = Math.abs(height) + 'px';
-                overlay.style.left = (width < 0 ? coords.displayX : startX) + 'px';
-                overlay.style.top = (height < 0 ? coords.displayY : startY) + 'px';
-                
-                e.preventDefault();
-            }});
-            
-            image.addEventListener('mouseup', (e) => {{
-                if (!isSelecting) return;
-                
-                isSelecting = false;
-                const coords = getImageCoordinates(e);
-                
-                // Calculate actual selection coordinates
-                const scaleX = image.naturalWidth / image.clientWidth;
-                const scaleY = image.naturalHeight / image.clientHeight;
-                
-                const x1 = Math.round(startX * scaleX);
-                const y1 = Math.round(startY * scaleY);
-                const x2 = coords.x;
-                const y2 = coords.y;
-                
-                const finalX = Math.min(x1, x2);
-                const finalY = Math.min(y1, y2);
-                const finalW = Math.abs(x2 - x1);
-                const finalH = Math.abs(y2 - y1);
-                
-                if (finalW > 10 && finalH > 10) {{
-                    currentSelection = {{
-                        x: finalX,
-                        y: finalY,
-                        width: finalW,
-                        height: finalH
-                    }};
-                    
-                    selectionInfo.textContent = `Selection: ${{finalW}}×${{finalH}} pixels at (${{finalX}}, ${{finalY}})`;
-                    extractBtn.disabled = false;
-                }} else {{
-                    clearSelection();
-                }}
-                
-                e.preventDefault();
-            }});
-            
-            function clearSelection() {{
-                overlay.style.display = 'none';
-                currentSelection = null;
-                selectionInfo.textContent = 'No selection made';
-                extractBtn.disabled = true;
-            }}
-            
-            clearBtn.addEventListener('click', clearSelection);
-            
-            extractBtn.addEventListener('click', () => {{
-                if (currentSelection) {{
-                    // Send selection data to Streamlit
-                    window.parent.postMessage({{
-                        type: 'selection',
-                        data: currentSelection
-                    }}, '*');
-                }}
-            }});
-            
-            // Prevent context menu on image
-            image.addEventListener('contextmenu', (e) => e.preventDefault());
-        </script>
-    </body>
-    </html>
-    """
+    img_width, img_height = st.session_state.enhanced_image.size
     
-    return html_code
+    st.subheader("📐 Crop Selection")
+    st.info("🎯 Use the sliders below to select the area you want to extract text from")
+    
+    # Create two columns for better layout
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("**X Position & Width:**")
+        crop_x = st.slider("X Start", 0, img_width-1, 0, key="crop_x")
+        crop_w = st.slider("Width", 1, img_width-crop_x, min(200, img_width-crop_x), key="crop_w")
+    
+    with col2:
+        st.write("**Y Position & Height:**")
+        crop_y = st.slider("Y Start", 0, img_height-1, 0, key="crop_y")
+        crop_h = st.slider("Height", 1, img_height-crop_y, min(100, img_height-crop_y), key="crop_h")
+    
+    # Show crop preview
+    try:
+        cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+        
+        # Display the cropped preview
+        st.write("**🔍 Crop Preview:**")
+        st.image(cropped_image, caption=f"Cropped Area: {crop_w}×{crop_h} pixels", width=400)
+        
+        return cropped_image, crop_x, crop_y, f"{crop_w}×{crop_h}"
+        
+    except Exception as e:
+        st.error(f"Crop error: {str(e)}")
+        return None, None, None, None
 
 # Initialize session state
 if 'original_image' not in st.session_state:
@@ -542,8 +361,8 @@ if 'enhanced_image' not in st.session_state:
     st.session_state.enhanced_image = None
 if 'ocr_result' not in st.session_state:
     st.session_state.ocr_result = ""
-if 'selection_data' not in st.session_state:
-    st.session_state.selection_data = None
+if 'cropped_image' not in st.session_state:
+    st.session_state.cropped_image = None
 
 # Main UI
 st.title("🔧 Enhanced Image OCR Extractor")
@@ -643,105 +462,55 @@ if uploaded_file is not None:
             st.subheader("✨ Enhanced Image")
             st.info("Click 'Generate Enhanced Image' to see the enhanced version")
     
-    # OCR Operations with Interactive Selection
+    # OCR Operations with Working Selection
     if st.session_state.enhanced_image is not None:
-        st.header("🔍 Interactive Text Selection & OCR")
+        st.header("🔍 Text Selection & OCR")
         
-        # Convert enhanced image to base64
-        enhanced_b64 = image_to_base64(st.session_state.enhanced_image)
-        img_width, img_height = st.session_state.enhanced_image.size
+        # Create the working crop interface
+        cropped_image, crop_x, crop_y, crop_size = create_crop_interface()
         
-        # Create interactive image selector
-        selector_html = create_image_selector(enhanced_b64, img_width, img_height)
-        
-        # Display the interactive selector
-        selection_result = components.html(
-            selector_html,
-            height=600,
-            scrolling=True
-        )
-        
-        # OCR Control buttons
-        st.subheader("🎯 OCR Operations")
-        col1, col2, col3 = st.columns(3)
-        
-        with col1:
-            if st.button("✍️ Extract from Selection", type="primary"):
-                # For now, we'll show a message about selection
-                # In a real implementation, you'd get the selection coordinates from the JavaScript
-                st.info("🖱️ Please make a selection on the image above, then click the 'Extract Selection' button in the image interface.")
-        
-        with col2:
-            if st.button("🔄 Multiple Attempts on Selection"):
-                st.info("🖱️ Please make a selection on the image above first.")
-        
-        with col3:
-            if st.button("📄 Process Full Enhanced Image"):
-                with st.spinner("Processing full enhanced image..."):
-                    result = perform_ocr(st.session_state.enhanced_image, ocr_mode, language)
-                    st.session_state.ocr_result = result
-        
-        # Manual crop option as fallback
-        with st.expander("📐 Manual Crop Alternative (if selection tool doesn't work)"):
-            st.info("Use this if the interactive selection tool above is not working properly.")
+        if cropped_image is not None:
+            st.session_state.cropped_image = cropped_image
             
-            col1, col2, col3, col4 = st.columns(4)
+            # OCR Control buttons
+            st.subheader("🎯 OCR Operations")
+            col1, col2, col3 = st.columns(3)
             
             with col1:
-                crop_x = st.number_input("X", min_value=0, max_value=st.session_state.enhanced_image.size[0], value=0, key="manual_x")
-            with col2:
-                crop_y = st.number_input("Y", min_value=0, max_value=st.session_state.enhanced_image.size[1], value=0, key="manual_y")
-            with col3:
-                crop_w = st.number_input("Width", min_value=1, max_value=st.session_state.enhanced_image.size[0], value=min(200, st.session_state.enhanced_image.size[0]), key="manual_w")
-            with col4:
-                crop_h = st.number_input("Height", min_value=1, max_value=st.session_state.enhanced_image.size[1], value=min(100, st.session_state.enhanced_image.size[1]), key="manual_h")
+                if st.button("✍️ Extract from Selection", type="primary"):
+                    with st.spinner("Extracting text from selection..."):
+                        result = perform_ocr(cropped_image, ocr_mode, language)
+                        st.session_state.ocr_result = result
+                        if result:
+                            st.success(f"🎯 Extracted: {result}")
+                        else:
+                            st.warning("No text detected in selection")
             
-            # Show manual crop preview
-            if crop_w > 0 and crop_h > 0:
-                try:
-                    cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
-                    st.image(cropped_image, caption="Manual Crop Preview", width=300)
-                    
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        if st.button("✍️ OCR Manual Crop", key="manual_ocr"):
-                            with st.spinner("Extracting text from manual crop..."):
-                                result = perform_ocr(cropped_image, ocr_mode, language)
-                                st.session_state.ocr_result = result
-                    
-                    with col2:
-                        if st.button("🔄 Multiple Attempts Manual Crop", key="manual_multi"):
-                            with st.spinner("Trying multiple OCR approaches on manual crop..."):
-                                all_results, clean_results = multi_attempt_ocr(cropped_image, language)
-                                
-                                st.subheader("🔢 Multiple Attempt Results (Manual Crop)")
-                                for i, result in enumerate(all_results, 1):
-                                    st.text(f"Attempt {i}: {result}")
-                                
-                                if clean_results:
-                                    best_result = max(clean_results, key=len)
-                                    st.session_state.ocr_result = best_result
-                                    st.success(f"🎯 Best Result: {best_result}")
-                except Exception as e:
-                    st.error(f"Crop error: {str(e)}")
-        
-        # JavaScript communication handler (for future implementation)
-        st.markdown("""
-        <script>
-        // Listen for messages from the image selector
-        window.addEventListener('message', function(event) {
-            if (event.data.type === 'selection') {
-                // Store selection data in Streamlit session state
-                console.log('Selection received:', event.data.data);
-                // This would need to be implemented with a proper Streamlit-JS bridge
-            }
-        });
-        </script>
-        """, unsafe_allow_html=True)
-        
-        # Display current selection info (placeholder)
-        if st.session_state.selection_data:
-            st.info(f"📐 Current Selection: {st.session_state.selection_data}")
+            with col2:
+                if st.button("🔄 Multiple Attempts on Selection"):
+                    with st.spinner("Trying multiple OCR approaches on selection..."):
+                        all_results, clean_results = multi_attempt_ocr(cropped_image, language)
+                        
+                        st.subheader("🔢 Multiple Attempt Results")
+                        for i, result in enumerate(all_results, 1):
+                            st.text(f"Attempt {i}: {result}")
+                        
+                        if clean_results:
+                            best_result = max(clean_results, key=len)
+                            st.session_state.ocr_result = best_result
+                            st.success(f"🎯 Best Result: {best_result}")
+                        else:
+                            st.warning("No text detected in any attempt")
+            
+            with col3:
+                if st.button("📄 Process Full Enhanced Image"):
+                    with st.spinner("Processing full enhanced image..."):
+                        result = perform_ocr(st.session_state.enhanced_image, ocr_mode, language)
+                        st.session_state.ocr_result = result
+                        if result:
+                            st.success(f"🎯 Full Image: {result}")
+                        else:
+                            st.warning("No text detected in full image")
         
         # Display results
         if st.session_state.ocr_result:
@@ -820,16 +589,16 @@ with st.expander("💡 Tips for Better Results"):
     - **Best Practice:** Try "Multiple Attempts" - it tests all number recognition methods
     
     ### 📐 Using the Selection Tool:
-    - **Interactive Selection:** Click and drag on the enhanced image to select text areas
+    - **Slider Controls:** Use the X/Y sliders to position your selection area
+    - **Width/Height:** Adjust the width and height sliders to size your selection
+    - **Preview:** The crop preview shows exactly what will be processed
     - **Precise Selection:** Make tight selections around the text you want to extract
-    - **Multiple Selections:** You can make multiple selections and extract each one
-    - **Clear Selection:** Use the "Clear Selection" button to start over
-    - **Fallback Option:** Use manual crop if the interactive tool doesn't work
+    - **Multiple Selections:** You can adjust sliders and extract different areas
     
     ### 📋 General Tips:
     - **Step 1:** Choose the best enhancement method for your image type
     - **Step 2:** Generate the enhanced image (this is your working canvas)
-    - **Step 3:** Use the interactive selection tool to select text areas
+    - **Step 3:** Use the sliders to select the text area you want
     - **Step 4:** Extract text using appropriate OCR mode
     - Try "Handwriting Optimized" for handwritten notes
     - Use "High Contrast Boost" for faded or low-contrast text
@@ -866,11 +635,44 @@ st.markdown("### 🔧 Features:")
 st.markdown("""
 - ✨ **13 Advanced Enhancement Methods** - Specialized algorithms for different image types
 - 🔢 **10 Specialized OCR Modes** - Optimized for numbers, measurements, currency, and more
-- 📐 **Interactive Selection Tool** - Click and drag to select text areas
+- 📐 **Reliable Slider-Based Selection** - Easy-to-use sliders for precise area selection
 - 🔄 **Multiple Attempt Mode** - Tries all methods automatically for best results
 - 🌍 **Multi-language Support** - Support for multiple languages
 - 📊 **Real-time Comparison** - See original vs enhanced images side by side
+- 🎯 **Live Preview** - See exactly what area you're selecting before OCR
 """)
+
+# Quick Start Guide
+with st.expander("🚀 Quick Start Guide"):
+    st.markdown("""
+    ### 🎯 Getting Started in 4 Simple Steps:
+    
+    **1. Upload Your Image** 📁
+    - Click "Browse files" and upload your image
+    - Supports PNG, JPG, JPEG, TIFF, BMP formats
+    
+    **2. Choose Enhancement Method** 🎨
+    - For numbers/measurements: Select "Number Recognition Optimized"
+    - For handwriting: Select "Handwriting Optimized"  
+    - For general text: Select "Auto Adaptive Enhancement"
+    - Click "Generate Enhanced Image"
+    
+    **3. Select Text Area** 📐
+    - Use the X/Y sliders to position your selection
+    - Use Width/Height sliders to size your selection
+    - Watch the preview to see exactly what you're selecting
+    
+    **4. Extract Text** ✍️
+    - Choose appropriate OCR mode (e.g., "Precise Number Recognition" for numbers)
+    - Click "Extract from Selection" or "Multiple Attempts" for best results
+    - Copy your extracted text from the results box
+    
+    ### 🎯 Pro Tips:
+    - For **best number recognition**: Use "Number Recognition Optimized" + "Precise Number Recognition"
+    - For **unclear text**: Try "Multiple Attempts" - it tests many different approaches
+    - For **small text**: Make your selection as tight as possible around the text
+    - For **mixed content**: Use "Process Full Enhanced Image" first to see what's detected
+    """)
 
 # Debug information (only show if needed)
 if st.checkbox("🔧 Show Debug Info", help="Show technical information for troubleshooting"):
@@ -897,3 +699,40 @@ if st.checkbox("🔧 Show Debug Info", help="Show technical information for trou
         except Exception as e:
             st.error(f"❌ Tesseract Error: {e}")
             st.info("Please ensure Tesseract is properly installed. See setup instructions in the README.")
+
+# Additional helper section for common issues
+with st.expander("🔧 Troubleshooting Common Issues"):
+    st.markdown("""
+    ### 📋 Common Issues & Solutions:
+    
+    **No text detected?** 🤔
+    - Try different enhancement methods (Number Optimized, High Contrast, etc.)
+    - Make sure your selection is tight around the text
+    - Try "Multiple Attempts" mode
+    - Check if text is too small or blurry
+    
+    **Numbers not recognized correctly?** 🔢
+    - Use "Number Recognition Optimized" enhancement
+    - Select "Precise Number Recognition" OCR mode
+    - For measurements like "12.5kg", use "Measurements" mode
+    - Make selection as close to the numbers as possible
+    
+    **Handwriting not working?** ✍️
+    - Use "Handwriting Optimized" enhancement
+    - Select "Handwriting Optimized" OCR mode
+    - Ensure handwriting is clear and not too cursive
+    - Try increasing contrast if handwriting is faint
+    
+    **App running slowly?** ⏱️
+    - Large images take more time to process
+    - Try smaller crop selections instead of full image
+    - Some enhancement methods are more computationally intensive
+    
+    **Tesseract errors?** ⚠️
+    - Check the debug section to test Tesseract installation
+    - Make sure all required dependencies are installed
+    - Try different OCR modes if one fails
+    """)
+
+st.markdown("---")
+st.markdown("**Made with ❤️ using Streamlit, OpenCV, and Tesseract OCR**")
