@@ -1,80 +1,21 @@
 import streamlit as st
-
-
 import cv2
-
 import numpy as np
-import pytesseract
 from PIL import Image, ImageEnhance, ImageFilter
-from scipy import ndimage
-from skimage import morphology, exposure, restoration, filters
+import pytesseract
 import io
 import base64
+from scipy import ndimage
+from skimage import morphology, exposure, restoration, filters
+import tempfile
 import os
 
-# Configure page
+# Set page config
 st.set_page_config(
-    page_title="Enhanced OCR Extractor",
+    page_title="🔧 Enhanced Image OCR Extractor",
     page_icon="🔧",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    layout="wide"
 )
-
-# Custom CSS for better styling
-st.markdown("""
-<style>
-    .main-header {
-        font-size: 2.5rem;
-        color: #1f77b4;
-        text-align: center;
-        margin-bottom: 2rem;
-        text-shadow: 2px 2px 4px rgba(0,0,0,0.1);
-    }
-    .step-header {
-        background: linear-gradient(90deg, #ff6b6b, #ee5a24);
-        color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-        font-weight: bold;
-        font-size: 1.2rem;
-    }
-    .tips-box {
-        background-color: #e3f2fd;
-        border-left: 4px solid #2196f3;
-        padding: 1rem;
-        margin: 1rem 0;
-        border-radius: 0 10px 10px 0;
-    }
-    .result-box {
-        background-color: #f8f9fa;
-        border: 1px solid #dee2e6;
-        border-radius: 10px;
-        padding: 1rem;
-        margin: 1rem 0;
-        font-family: monospace;
-        white-space: pre-wrap;
-        max-height: 300px;
-        overflow-y: auto;
-    }
-    .success-box {
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
-    .warning-box {
-        background-color: #fff3cd;
-        border: 1px solid #ffeaa7;
-        color: #856404;
-        padding: 1rem;
-        border-radius: 10px;
-        margin: 1rem 0;
-    }
-</style>
-""", unsafe_allow_html=True)
 
 def advanced_image_enhancement(img, method='auto_adaptive'):
     """Apply advanced enhancement methods to generate improved image"""
@@ -83,74 +24,127 @@ def advanced_image_enhancement(img, method='auto_adaptive'):
 
     if method == 'number_optimized':
         # Specialized enhancement for number recognition
+        # 1. Strong denoising
         denoised = cv2.fastNlMeansDenoising(gray, h=12)
+
+        # 2. High contrast enhancement
         clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(6,6))
         enhanced = clahe.apply(denoised)
+
+        # 3. Morphological operations to clean digits
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
         cleaned = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+
+        # 4. Edge-preserving smoothing
         smoothed = cv2.bilateralFilter(cleaned, 9, 80, 80)
+
+        # 5. Adaptive thresholding for better digit separation
         binary = cv2.adaptiveThreshold(smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+
+        # 6. Slight dilation to thicken thin digits
         kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
         result = cv2.dilate(binary, kernel_dilate, iterations=1)
 
     elif method == 'measurement_enhanced':
         # For measurements like "12.51m", "3.4kg", etc.
+        # 1. Denoise
         denoised = cv2.fastNlMeansDenoising(gray, h=10)
+
+        # 2. Enhance contrast specifically for small text
         clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4,4))
         enhanced = clahe.apply(denoised)
+
+        # 3. Sharpen to make decimal points clearer
         kernel_sharp = np.array([[0,-1,0], [-1,5,-1], [0,-1,0]])
         sharpened = cv2.filter2D(enhanced, -1, kernel_sharp)
+
+        # 4. Morphological opening to separate connected characters
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-        result = cv2.morphologyEx(sharpened, cv2.MORPH_OPEN, kernel)
+        opened = cv2.morphologyEx(sharpened, cv2.MORPH_OPEN, kernel)
+
+        result = opened
 
     elif method == 'digit_sharpening':
         # For digital/printed numbers with maximum sharpness
+        # 1. Light denoising
         denoised = cv2.fastNlMeansDenoising(gray, h=8)
+
+        # 2. Unsharp masking for maximum sharpness
         gaussian = cv2.GaussianBlur(denoised, (0, 0), 1.5)
         unsharp = cv2.addWeighted(denoised, 2.0, gaussian, -1.0, 0)
+
+        # 3. High contrast
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
         enhanced = clahe.apply(unsharp)
+
+        # 4. Edge enhancement
         laplacian = cv2.Laplacian(enhanced, cv2.CV_64F, ksize=3)
         laplacian = np.uint8(np.absolute(laplacian))
         result = cv2.addWeighted(enhanced, 0.9, laplacian, 0.1, 0)
 
     elif method == 'auto_adaptive':
         # Comprehensive adaptive enhancement
+        # 1. Noise reduction
         denoised = cv2.fastNlMeansDenoising(gray, h=10)
+
+        # 2. Adaptive histogram equalization
         clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
         enhanced = clahe.apply(denoised)
+
+        # 3. Edge-preserving filtering
         smoothed = cv2.bilateralFilter(enhanced, 9, 75, 75)
+
+        # 4. Unsharp masking
         gaussian = cv2.GaussianBlur(smoothed, (0, 0), 2.0)
-        result = cv2.addWeighted(smoothed, 1.5, gaussian, -0.5, 0)
+        unsharp = cv2.addWeighted(smoothed, 1.5, gaussian, -0.5, 0)
+
+        result = unsharp
 
     elif method == 'handwriting_optimized':
         # Specifically for handwriting
+        # 1. Denoise
         denoised = cv2.fastNlMeansDenoising(gray, h=8)
+
+        # 2. Enhance contrast for handwriting
         clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(6,6))
         enhanced = clahe.apply(denoised)
+
+        # 3. Morphological closing to connect broken strokes
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
         closed = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
+
+        # 4. Slight sharpening
         kernel_sharp = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
-        result = cv2.filter2D(closed, -1, kernel_sharp)
+        sharpened = cv2.filter2D(closed, -1, kernel_sharp)
+
+        result = sharpened
 
     elif method == 'high_contrast':
         # Maximum contrast enhancement
         clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
         enhanced = clahe.apply(gray)
+
+        # Gamma correction
         gamma = 0.8
         lookup_table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
         result = cv2.LUT(enhanced, lookup_table)
 
     elif method == 'noise_reduction':
         # Advanced noise reduction
+        # Multiple denoising passes
         denoised1 = cv2.fastNlMeansDenoising(gray, h=10)
         denoised2 = cv2.bilateralFilter(denoised1, 9, 80, 80)
+
+        # Median filtering for salt-and-pepper noise
         result = cv2.medianBlur(denoised2, 3)
 
     elif method == 'edge_sharpening':
         # Edge enhancement and sharpening
+        # Laplacian edge detection
         laplacian = cv2.Laplacian(gray, cv2.CV_64F)
         laplacian = np.uint8(np.absolute(laplacian))
+
+        # Add edges back to original
         result = cv2.addWeighted(gray, 0.8, laplacian, 0.2, 0)
 
     elif method == 'brightness_contrast':
@@ -170,6 +164,7 @@ def advanced_image_enhancement(img, method='auto_adaptive'):
 
     elif method == 'morphological':
         # Morphological operations
+        # Opening followed by closing
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         opened = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel)
         result = cv2.morphologyEx(opened, cv2.MORPH_CLOSE, kernel)
@@ -177,6 +172,7 @@ def advanced_image_enhancement(img, method='auto_adaptive'):
     elif method == 'wiener_deconvolution':
         # Wiener deconvolution for blur removal
         try:
+            # Create a motion blur kernel
             psf = np.ones((5, 5)) / 25
             result_float = restoration.wiener(gray, psf, balance=0.1)
             result = (result_float * 255).astype(np.uint8)
@@ -196,7 +192,7 @@ def advanced_image_enhancement(img, method='auto_adaptive'):
 
 def get_ocr_config(mode, language):
     """Get OCR configuration based on mode with specialized number recognition"""
-    
+
     # Comprehensive character sets for different number types
     basic_numbers = '0123456789'
     decimal_numbers = '0123456789.,'
@@ -220,8 +216,8 @@ def get_ocr_config(mode, language):
     }
     return configs.get(mode, configs['numbers_precise'])
 
-def perform_ocr(img, ocr_mode='numbers_precise', language='eng'):
-    """Perform OCR on image"""
+def perform_ocr(img, ocr_mode='handwriting', language='eng'):
+    """Perform OCR on the image"""
     try:
         config = get_ocr_config(ocr_mode, language)
         text = pytesseract.image_to_string(img, config=config)
@@ -230,314 +226,310 @@ def perform_ocr(img, ocr_mode='numbers_precise', language='eng'):
         st.error(f"OCR Error: {str(e)}")
         return ""
 
-def crop_image(img, crop_coords):
-    """Crop image based on coordinates"""
-    if crop_coords is None:
-        return img
-    
-    x, y, w, h = crop_coords
-    return img.crop((x, y, x + w, y + h))
-
 def multi_attempt_ocr(img, language='eng'):
     """Try multiple OCR approaches on the image with focus on numbers"""
-    results = []
-    
-    # Try different OCR modes with priority on number recognition
-    number_modes = ['numbers_precise', 'measurements', 'scientific_notation', 'currency', 'coordinates']
-    other_modes = ['handwriting', 'single_word', 'print', 'mixed']
-    all_modes = number_modes + other_modes
-
-    # First pass: Try all modes on original image
-    for ocr_mode in all_modes:
-        try:
-            config = get_ocr_config(ocr_mode, language)
-            text = pytesseract.image_to_string(img, config=config).strip()
-            if text and text not in [r.split('] ', 1)[1] if '] ' in r else r for r in results]:
-                results.append(f"[{ocr_mode}] {text}")
-        except:
-            continue
-
-    # Second pass: Try with additional processing optimized for numbers
     try:
-        gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-        
-        # Multiple threshold techniques
-        threshold_methods = [
-            cv2.THRESH_BINARY + cv2.THRESH_OTSU,
-            cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
-        ]
+        results = []
 
-        for thresh_method in threshold_methods:
+        # Try different OCR modes with priority on number recognition
+        number_modes = ['numbers_precise', 'measurements', 'scientific_notation', 'currency', 'coordinates']
+        other_modes = ['handwriting', 'single_word', 'print', 'mixed']
+
+        all_modes = number_modes + other_modes
+
+        # First pass: Try all modes on original enhanced image
+        for ocr_mode in all_modes:
             try:
-                _, binary = cv2.threshold(gray, 0, 255, thresh_method)
-                binary_img = Image.fromarray(binary)
-
-                # Try number-specific modes on threshold images
-                for ocr_mode in number_modes:
-                    try:
-                        config = get_ocr_config(ocr_mode, language)
-                        text = pytesseract.image_to_string(binary_img, config=config).strip()
-                        result_text = f"[{ocr_mode}_thresh] {text}"
-                        if text and result_text not in results:
-                            results.append(result_text)
-                    except:
-                        continue
+                config = get_ocr_config(ocr_mode, language)
+                text = pytesseract.image_to_string(img, config=config).strip()
+                if text and text not in results:
+                    results.append(f"[{ocr_mode}] {text}")
             except:
                 continue
-    except:
-        pass
 
-    # Clean up results
-    clean_results = []
-    for result in results:
-        if '] ' in result:
-            clean_text = result.split('] ', 1)[1]
-            if clean_text and clean_text not in clean_results:
-                clean_results.append(clean_text)
+        # Second pass: Try with additional processing optimized for numbers
+        try:
+            # Convert to grayscale and apply strong threshold for crisp numbers
+            gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
 
-    return results, clean_results
+            # Multiple threshold techniques
+            threshold_methods = [
+                cv2.THRESH_BINARY + cv2.THRESH_OTSU,
+                cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU,
+            ]
+
+            for thresh_method in threshold_methods:
+                try:
+                    _, binary = cv2.threshold(gray, 0, 255, thresh_method)
+                    binary_img = Image.fromarray(binary)
+
+                    # Try number-specific modes on threshold images
+                    for ocr_mode in number_modes:
+                        try:
+                            config = get_ocr_config(ocr_mode, language)
+                            text = pytesseract.image_to_string(binary_img, config=config).strip()
+                            if text and f"[{ocr_mode}_thresh] {text}" not in results:
+                                results.append(f"[{ocr_mode}_thresh] {text}")
+                        except:
+                            continue
+                except:
+                    continue
+        except:
+            pass
+
+        # Third pass: Try with morphological operations for better digit separation
+        try:
+            gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+
+            # Morphological operations
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+
+            # Opening to separate connected digits
+            opened = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel)
+            opened_img = Image.fromarray(opened)
+
+            # Closing to connect broken digits
+            closed = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+            closed_img = Image.fromarray(closed)
+
+            for processed_img, suffix in [(opened_img, '_opened'), (closed_img, '_closed')]:
+                for ocr_mode in number_modes[:3]:  # Try top 3 number modes
+                    try:
+                        config = get_ocr_config(ocr_mode, language)
+                        text = pytesseract.image_to_string(processed_img, config=config).strip()
+                        if text and f"[{ocr_mode}{suffix}] {text}" not in results:
+                            results.append(f"[{ocr_mode}{suffix}] {text}")
+                    except:
+                        continue
+        except:
+            pass
+
+        # Clean up results and remove method labels for final display
+        clean_results = []
+        for result in results:
+            if '] ' in result:
+                clean_text = result.split('] ', 1)[1]
+                if clean_text and clean_text not in clean_results:
+                    clean_results.append(clean_text)
+
+        return results, clean_results
+
+    except Exception as e:
+        st.error(f"Multi-attempt error: {str(e)}")
+        return [], []
+
+def crop_image(img, x, y, w, h):
+    """Crop image based on coordinates"""
+    return img.crop((x, y, x + w, y + h))
 
 # Initialize session state
 if 'original_image' not in st.session_state:
     st.session_state.original_image = None
 if 'enhanced_image' not in st.session_state:
     st.session_state.enhanced_image = None
-if 'crop_coords' not in st.session_state:
-    st.session_state.crop_coords = None
+if 'ocr_result' not in st.session_state:
+    st.session_state.ocr_result = ""
 
-# Main App
-st.markdown('<h1 class="main-header">🔧 Enhanced Image OCR Extractor</h1>', unsafe_allow_html=True)
+# Main UI
+st.title("🔧 Enhanced Image OCR Extractor")
+st.markdown("**Optimized for Number Recognition with Advanced Image Enhancement**")
 
-# Sidebar for controls
-with st.sidebar:
-    st.header("🎛️ Controls")
-    
-    # File upload
-    uploaded_file = st.file_uploader(
-        "Upload Image", 
-        type=['png', 'jpg', 'jpeg', 'gif', 'bmp'],
-        help="Upload an image containing text or numbers to extract"
-    )
-    
-    # Enhancement method selection
-    enhancement_method = st.selectbox(
-        "🎨 Enhancement Method",
-        options=[
-            'number_optimized', 'measurement_enhanced', 'digit_sharpening',
-            'auto_adaptive', 'handwriting_optimized', 'high_contrast',
-            'noise_reduction', 'edge_sharpening', 'brightness_contrast',
-            'histogram_equalization', 'unsharp_masking', 'morphological',
-            'wiener_deconvolution'
-        ],
-        format_func=lambda x: {
-            'number_optimized': '🔢 Number Recognition Optimized',
-            'measurement_enhanced': '📏 Measurement Text Enhanced',
-            'digit_sharpening': '🎯 Digital/Printed Numbers',
-            'auto_adaptive': '🤖 Auto Adaptive Enhancement',
-            'handwriting_optimized': '✍️ Handwriting Optimized',
-            'high_contrast': '⚡ High Contrast Boost',
-            'noise_reduction': '🧹 Advanced Noise Reduction',
-            'edge_sharpening': '📐 Edge Sharpening',
-            'brightness_contrast': '💡 Brightness & Contrast',
-            'histogram_equalization': '📊 Histogram Equalization',
-            'unsharp_masking': '🔍 Unsharp Masking',
-            'morphological': '🔄 Morphological Enhancement',
-            'wiener_deconvolution': '🌟 Wiener Deconvolution'
-        }[x],
-        help="Choose the best enhancement method for your image type"
-    )
-    
-    # OCR mode selection
-    ocr_mode = st.selectbox(
-        "🔍 OCR Mode",
-        options=[
-            'numbers_precise', 'measurements', 'scientific_notation',
-            'currency', 'coordinates', 'handwriting', 'print', 'mixed',
-            'numbers', 'single_word'
-        ],
-        format_func=lambda x: {
-            'numbers_precise': '🔢 Precise Number Recognition',
-            'measurements': '📏 Measurements (12.51m, 3.4kg, etc.)',
-            'scientific_notation': '🧪 Scientific Numbers (1.5e-3, etc.)',
-            'currency': '💰 Currency & Financial Numbers',
-            'coordinates': '🗺️ Coordinates & GPS Numbers',
-            'handwriting': '📝 Handwriting Optimized',
-            'print': '🖨️ Printed Text',
-            'mixed': '🔀 Mixed Text',
-            'numbers': '🔢 Basic Numbers',
-            'single_word': '📄 Single Word'
-        }[x],
-        help="Choose the OCR mode that matches your content type"
-    )
-    
-    # Language selection
-    language = st.selectbox(
-        "🌐 Language",
-        options=['eng', 'eng+ara', 'eng+chi_sim', 'eng+fra', 'eng+deu', 'eng+spa', 'eng+rus'],
-        format_func=lambda x: {
-            'eng': 'English',
-            'eng+ara': 'English + Arabic',
-            'eng+chi_sim': 'English + Chinese',
-            'eng+fra': 'English + French',
-            'eng+deu': 'English + German',
-            'eng+spa': 'English + Spanish',
-            'eng+rus': 'English + Russian'
-        }[x],
-        help="Select the language(s) for OCR recognition"
-    )
+# Sidebar for settings
+st.sidebar.header("⚙️ Settings")
 
-# Main content area
+# File upload
+uploaded_file = st.file_uploader(
+    "Upload Image", 
+    type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
+    help="Upload an image containing text or numbers to extract"
+)
+
 if uploaded_file is not None:
     # Load original image
-    st.session_state.original_image = Image.open(uploaded_file)
+    original_image = Image.open(uploaded_file)
+    st.session_state.original_image = original_image
     
-    # Step 1: Image Enhancement
-    st.markdown('<div class="step-header">🎨 Step 1: Image Enhancement</div>', unsafe_allow_html=True)
+    # Enhancement settings
+    st.sidebar.subheader("🎨 Image Enhancement")
+    enhancement_method = st.sidebar.selectbox(
+        "Enhancement Method",
+        [
+            ('number_optimized', '🔢 Number Recognition Optimized'),
+            ('measurement_enhanced', '📏 Measurement Text Enhanced'),
+            ('digit_sharpening', '🎯 Digital/Printed Numbers'),
+            ('auto_adaptive', '🤖 Auto Adaptive Enhancement'),
+            ('handwriting_optimized', '✍️ Handwriting Optimized'),
+            ('high_contrast', '⚡ High Contrast Boost'),
+            ('noise_reduction', '🧹 Advanced Noise Reduction'),
+            ('edge_sharpening', '📐 Edge Sharpening'),
+            ('brightness_contrast', '💡 Brightness & Contrast'),
+            ('histogram_equalization', '📊 Histogram Equalization'),
+            ('unsharp_masking', '🔍 Unsharp Masking'),
+            ('morphological', '🔄 Morphological Enhancement'),
+            ('wiener_deconvolution', '🌟 Wiener Deconvolution')
+        ],
+        format_func=lambda x: x[1]
+    )[0]
     
+    # OCR settings
+    st.sidebar.subheader("📝 OCR Settings")
+    ocr_mode = st.sidebar.selectbox(
+        "OCR Mode",
+        [
+            ('numbers_precise', '🔢 Precise Number Recognition'),
+            ('measurements', '📏 Measurements (12.51m, 3.4kg, etc.)'),
+            ('scientific_notation', '🧪 Scientific Numbers (1.5e-3, etc.)'),
+            ('currency', '💰 Currency & Financial Numbers'),
+            ('coordinates', '🗺️ Coordinates & GPS Numbers'),
+            ('handwriting', '📝 Handwriting Optimized'),
+            ('print', '🖨️ Printed Text'),
+            ('mixed', '🔀 Mixed Text'),
+            ('numbers', '🔢 Basic Numbers'),
+            ('single_word', '📄 Single Word')
+        ],
+        format_func=lambda x: x[1]
+    )[0]
+    
+    language = st.sidebar.selectbox(
+        "Language",
+        [
+            ('eng', 'English'),
+            ('eng+ara', 'English + Arabic'),
+            ('eng+chi_sim', 'English + Chinese'),
+            ('eng+fra', 'English + French'),
+            ('eng+deu', 'English + German'),
+            ('eng+spa', 'English + Spanish'),
+            ('eng+rus', 'English + Russian')
+        ],
+        format_func=lambda x: x[1]
+    )[0]
+    
+    # Generate enhanced image
+    if st.sidebar.button("🚀 Generate Enhanced Image", type="primary"):
+        with st.spinner("Generating enhanced image..."):
+            enhanced_image = advanced_image_enhancement(original_image, enhancement_method)
+            st.session_state.enhanced_image = enhanced_image
+            st.sidebar.success("✅ Enhanced image generated!")
+    
+    # Display images
     col1, col2 = st.columns(2)
     
     with col1:
-        st.subheader("📤 Original Image")
-        st.image(st.session_state.original_image, use_column_width=True)
-        st.info(f"Size: {st.session_state.original_image.size[0]}×{st.session_state.original_image.size[1]}")
+        st.subheader("📷 Original Image")
+        st.image(original_image, use_column_width=True)
+        st.caption(f"Size: {original_image.size[0]}×{original_image.size[1]}")
     
     with col2:
-        if st.button("🚀 Generate Enhanced Image", type="primary", use_container_width=True):
-            with st.spinner("Enhancing image..."):
-                st.session_state.enhanced_image = advanced_image_enhancement(
-                    st.session_state.original_image, 
-                    enhancement_method
-                )
-            st.success("✅ Image enhanced successfully!")
-        
         if st.session_state.enhanced_image is not None:
             st.subheader("✨ Enhanced Image")
             st.image(st.session_state.enhanced_image, use_column_width=True)
-            st.info(f"Enhancement: {enhancement_method}")
-
-    # Step 2: OCR Processing (only if enhanced image exists)
+            st.caption(f"Size: {st.session_state.enhanced_image.size[0]}×{st.session_state.enhanced_image.size[1]}")
+        else:
+            st.subheader("✨ Enhanced Image")
+            st.info("Click 'Generate Enhanced Image' to see the enhanced version")
+    
+    # OCR Operations
     if st.session_state.enhanced_image is not None:
-        st.markdown('<div class="step-header">🔍 Step 2: OCR Processing</div>', unsafe_allow_html=True)
+        st.header("🔍 OCR Operations")
         
-        # Create columns for buttons
+        # Option to crop image
+        use_crop = st.checkbox("📐 Crop image before OCR")
+        
+        working_image = st.session_state.enhanced_image
+        
+        if use_crop:
+            st.subheader("✂️ Crop Selection")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                crop_x = st.number_input("X", min_value=0, max_value=working_image.size[0], value=0)
+            with col2:
+                crop_y = st.number_input("Y", min_value=0, max_value=working_image.size[1], value=0)
+            with col3:
+                crop_w = st.number_input("Width", min_value=1, max_value=working_image.size[0], value=min(200, working_image.size[0]))
+            with col4:
+                crop_h = st.number_input("Height", min_value=1, max_value=working_image.size[1], value=min(100, working_image.size[1]))
+            
+            # Show crop preview
+            if crop_w > 0 and crop_h > 0:
+                cropped_image = crop_image(working_image, crop_x, crop_y, crop_w, crop_h)
+                st.image(cropped_image, caption="Crop Preview", width=300)
+                working_image = cropped_image
+        
+        # OCR buttons
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("📄 Process Full Enhanced Image", use_container_width=True):
-                with st.spinner("Processing full image..."):
-                    result = perform_ocr(st.session_state.enhanced_image, ocr_mode, language)
-                    
-                st.subheader("📋 OCR Results")
-                if result:
-                    st.markdown(f'<div class="result-box">{result}</div>', unsafe_allow_html=True)
-                    st.success(f"✅ Extracted {len(result)} characters")
-                    
-                    # Download button
-                    st.download_button(
-                        label="💾 Download Results",
-                        data=result,
-                        file_name="ocr_results.txt",
-                        mime="text/plain"
-                    )
-                else:
-                    st.warning("⚠️ No text detected")
+            if st.button("✍️ Extract Text", type="primary"):
+                with st.spinner("Extracting text..."):
+                    result = perform_ocr(working_image, ocr_mode, language)
+                    st.session_state.ocr_result = result
         
         with col2:
-            if st.button("🔄 Multiple Attempts", use_container_width=True):
+            if st.button("🔄 Multiple Attempts"):
                 with st.spinner("Trying multiple OCR approaches..."):
-                    all_results, clean_results = multi_attempt_ocr(st.session_state.enhanced_image, language)
-                
-                st.subheader("🎯 Multiple Attempt Results")
-                
-                if clean_results:
-                    # Show all attempts
-                    with st.expander("📊 All Attempts", expanded=True):
-                        for i, result in enumerate(all_results, 1):
-                            st.write(f"**Attempt {i}:** {result}")
+                    all_results, clean_results = multi_attempt_ocr(working_image, language)
                     
-                    # Show clean results
-                    st.subheader("🏆 Clean Results")
-                    for i, result in enumerate(clean_results, 1):
-                        st.markdown(f'<div class="result-box">Result {i}: {result}</div>', unsafe_allow_html=True)
+                    st.subheader("🔢 Multiple Attempt Results")
+                    for i, result in enumerate(all_results, 1):
+                        st.text(f"Attempt {i}: {result}")
                     
-                    # Best result
-                    best_result = max(clean_results, key=len) if clean_results else ""
-                    if best_result:
-                        st.markdown(f'<div class="success-box"><strong>🎯 Best Result:</strong> {best_result}</div>', unsafe_allow_html=True)
-                        
-                        # Download best result
-                        st.download_button(
-                            label="💾 Download Best Result",
-                            data=best_result,
-                            file_name="best_ocr_result.txt",
-                            mime="text/plain"
-                        )
-                else:
-                    st.warning("⚠️ No text detected in any attempt")
+                    if clean_results:
+                        best_result = max(clean_results, key=len)
+                        st.session_state.ocr_result = best_result
+                        st.success(f"🎯 Best Result: {best_result}")
         
         with col3:
-            # Image crop functionality (simplified for Streamlit)
-            st.info("🎯 For precise text selection, use the coordinate inputs below")
+            if st.button("📄 Process Full Image"):
+                with st.spinner("Processing full enhanced image..."):
+                    result = perform_ocr(st.session_state.enhanced_image, ocr_mode, language)
+                    st.session_state.ocr_result = result
+        
+        # Display results
+        if st.session_state.ocr_result:
+            st.header("📋 OCR Results")
             
-            # Coordinate inputs for cropping
-            with st.expander("✂️ Crop Settings"):
-                crop_x = st.number_input("X coordinate", min_value=0, value=0)
-                crop_y = st.number_input("Y coordinate", min_value=0, value=0)
-                crop_w = st.number_input("Width", min_value=1, value=100)
-                crop_h = st.number_input("Height", min_value=1, value=100)
+            result_container = st.container()
+            with result_container:
+                st.text_area(
+                    "Extracted Text",
+                    value=st.session_state.ocr_result,
+                    height=150,
+                    key="result_text"
+                )
                 
-                if st.button("✂️ Process Cropped Area"):
-                    crop_coords = (crop_x, crop_y, crop_w, crop_h)
-                    cropped_img = crop_image(st.session_state.enhanced_image, crop_coords)
-                    
-                    # Show cropped image
-                    st.image(cropped_img, caption="Cropped Area", use_column_width=True)
-                    
-                    # Process cropped area
-                    with st.spinner("Processing cropped area..."):
-                        result = perform_ocr(cropped_img, ocr_mode, language)
-                    
-                    if result:
-                        st.markdown(f'<div class="result-box">{result}</div>', unsafe_allow_html=True)
-                        st.success(f"✅ Extracted {len(result)} characters from cropped area")
-                    else:
-                        st.warning("⚠️ No text detected in cropped area")
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Characters", len(st.session_state.ocr_result))
+                with col2:
+                    st.metric("Words", len(st.session_state.ocr_result.split()))
+                
+                # Copy button functionality
+                if st.button("📋 Copy to Clipboard"):
+                    st.code(st.session_state.ocr_result)
+                    st.success("Text displayed above - you can now copy it!")
 
 # Tips section
-st.markdown('<div class="step-header">💡 Tips for Better Results</div>', unsafe_allow_html=True)
-
-tips_col1, tips_col2 = st.columns(2)
-
-with tips_col1:
+with st.expander("💡 Tips for Better Results"):
     st.markdown("""
-    <div class="tips-box">
-        <h4>🎨 Enhancement Tips:</h4>
-        <ul>
-            <li><strong>Number Recognition Optimized:</strong> Best for pure numbers and digits</li>
-            <li><strong>Measurement Text Enhanced:</strong> Perfect for measurements like "12.51m", "3.4kg"</li>
-            <li><strong>Digital/Printed Numbers:</strong> Optimized for LCD/LED displays</li>
-            <li><strong>Handwriting Optimized:</strong> Use for handwritten notes</li>
-            <li><strong>High Contrast Boost:</strong> For faded or low-contrast text</li>
-            <li><strong>Auto Adaptive:</strong> Good overall enhancement for mixed content</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
-
-with tips_col2:
-    st.markdown("""
-    <div class="tips-box">
-        <h4>🔍 OCR Mode Tips:</h4>
-        <ul>
-            <li><strong>Precise Number Recognition:</strong> Pure numbers with decimals</li>
-            <li><strong>Measurements:</strong> Numbers with units (m, kg, cm, ft, etc.)</li>
-            <li><strong>Scientific Numbers:</strong> Scientific notation (1.5e-3, 2×10⁵)</li>
-            <li><strong>Currency:</strong> Money amounts ($123.45, €99.99)</li>
-            <li><strong>Coordinates:</strong> GPS coordinates (40.7128°N)</li>
-            <li><strong>Multiple Attempts:</strong> Try this for best results - tests all methods</li>
-        </ul>
-    </div>
-    """, unsafe_allow_html=True)
+    ### 🎯 Tips for Better Number Recognition:
+    - **For Pure Numbers:** Use "Number Recognition Optimized" enhancement + "Precise Number Recognition" OCR
+    - **For Measurements:** Use "Measurement Text Enhanced" + "Measurements" mode for "12.51m", "3.4kg", etc.
+    - **For Scientific Numbers:** Use "Scientific Numbers" mode for "1.5e-3", "2.4×10⁵", etc.
+    - **For Currency:** Use "Currency & Financial Numbers" for "$123.45", "€99.99", etc.
+    - **For GPS/Coordinates:** Use "Coordinates & GPS Numbers" for "40.7128°N", etc.
+    - **Digital Displays:** Use "Digital/Printed Numbers" enhancement for LCD/LED numbers
+    - **Best Practice:** Try "Multiple Attempts" - it tests all number recognition methods
+    
+    ### 📋 General Tips:
+    - **Step 1:** Choose the best enhancement method for your image type
+    - **Step 2:** The enhanced image will be your working canvas
+    - Try "Handwriting Optimized" for handwritten notes
+    - Use "High Contrast Boost" for faded or low-contrast text
+    - Select tight crops around the text you want to extract
+    - Compare original vs enhanced to see the improvement
+    """)
 
 # Footer
 st.markdown("---")
-st.markdown("**🔧 Enhanced OCR Extractor** - Optimized for Number Recognition | Built with Streamlit")
+st.markdown("🔧 **Enhanced Image OCR Extractor** - Optimized for Number Recognition with Advanced Image Enhancement")
