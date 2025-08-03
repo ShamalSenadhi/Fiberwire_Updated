@@ -17,6 +17,13 @@ st.set_page_config(
     layout="wide"
 )
 
+def pil_to_base64(img):
+    """Convert PIL image to base64 string for canvas background"""
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    img_str = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
 def advanced_image_enhancement(img, method='auto_adaptive'):
     """Apply advanced enhancement methods to generate improved image"""
     cv_img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
@@ -467,12 +474,15 @@ if uploaded_file is not None:
         st.subheader("🎯 Select Text Areas for OCR")
         st.markdown("*Draw a rectangle around the text you want to extract*")
         
+        # Convert PIL image to base64 for canvas background
+        background_image_data = pil_to_base64(st.session_state.enhanced_image)
+        
         # Create canvas with enhanced image as background
         canvas_result = st_canvas(
             fill_color="rgba(255, 165, 0, 0.2)",  # Orange with transparency
             stroke_width=2,
             stroke_color="#FF4444",
-            background_image=st.session_state.enhanced_image,
+            background_image=background_image_data,
             update_streamlit=True,
             height=min(400, st.session_state.enhanced_image.height),
             width=min(600, st.session_state.enhanced_image.width),
