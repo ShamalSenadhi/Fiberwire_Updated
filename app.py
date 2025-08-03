@@ -67,19 +67,25 @@ def advanced_image_enhancement(img, method='auto_adaptive'):
 
 def get_ocr_config(mode, language):
     """Get OCR configuration based on mode"""
+    # Specialized character sets for different measurement types
     basic_numbers = '0123456789'
     decimal_numbers = '0123456789.,'
-    measurement_chars = '0123456789.,-+()[]{}mkcglbftinMKCGLBFTIN°%'
+    meter_measurements = '0123456789.m'  # Optimized for "1484m" style readings
+    length_measurements = '0123456789.mkm'  # Include km for kilometers
+    wire_measurements = '0123456789.mMkK'  # Include uppercase variants
     
     configs = {
         'numbers_precise': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={decimal_numbers}',
-        'measurements': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={measurement_chars}',
+        'measurements': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={meter_measurements}',
+        'wire_length': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={wire_measurements}',
+        'meter_readings': f'--oem 3 --psm 7 -l {language} -c tessedit_char_whitelist={meter_measurements}',
+        'length_only': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={length_measurements}',
         'handwriting': f'--oem 3 --psm 8 -l {language}',
         'print': f'--oem 3 --psm 6 -l {language}',
         'mixed': f'--oem 3 --psm 3 -l {language}',
         'single_word': f'--oem 3 --psm 8 -l {language}'
     }
-    return configs.get(mode, configs['numbers_precise'])
+    return configs.get(mode, configs['measurements'])
 
 def perform_ocr(img, ocr_mode='mixed', language='eng'):
     """Perform OCR on the image"""
@@ -92,12 +98,17 @@ def perform_ocr(img, ocr_mode='mixed', language='eng'):
         return ""
 
 def multi_attempt_ocr(img, language='eng'):
-    """Try multiple OCR approaches on the image"""
+    """Try multiple OCR approaches optimized for wire length measurements"""
     try:
         results = []
-        modes = ['numbers_precise', 'measurements', 'handwriting', 'mixed', 'single_word']
+        # Priority modes for wire/length measurements
+        wire_modes = ['wire_length', 'meter_readings', 'measurements', 'length_only']
+        backup_modes = ['numbers_precise', 'handwriting', 'mixed', 'single_word']
         
-        for ocr_mode in modes:
+        all_modes = wire_modes + backup_modes
+        
+        # First pass: Try specialized wire measurement modes
+        for ocr_mode in all_modes:
             try:
                 config = get_ocr_config(ocr_mode, language)
                 text = pytesseract.image_to_string(img, config=config).strip()
@@ -106,35 +117,81 @@ def multi_attempt_ocr(img, language='eng'):
             except:
                 continue
         
-        # Try with different thresholding
+        # Second pass: Try with enhanced preprocessing for technical drawings
         try:
             gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-            _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-            binary_img = Image.fromarray(binary)
             
-            for ocr_mode in ['numbers_precise', 'measurements']:
-                try:
-                    config = get_ocr_config(ocr_mode, language)
-                    text = pytesseract.image_to_string(binary_img, config=config).strip()
-                    if text and f"[{ocr_mode}_thresh] {text}" not in results:
-                        results.append(f"[{ocr_mode}_thresh] {text}")
-                except:
-                    continue
+            # Multiple preprocessing approaches for technical drawings
+            preprocessing_methods = [
+                ('otsu', cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]),
+                ('inv_otsu', cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]),
+                ('adaptive', cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2))
+            ]
+            
+            for method_name, processed in preprocessing_methods:
+                processed_img = Image.fromarray(processed)
+                
+                # Try wire measurement modes on preprocessed images
+                for ocr_mode in wire_modes[:3]:  # Top 3 wire modes
+                    try:
+                        config = get_ocr_config(ocr_mode, language)
+                        text = pytesseract.image_to_string(processed_img, config=config).strip()
+                        result_key = f"[{ocr_mode}_{method_name}] {text}"
+                        if text and result_key not in results:
+                            results.append(result_key)
+                    except:
+                        continue
         except:
             pass
         
+        # Third pass: Morphological operations for cleaner digit separation
+        try:
+            gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
+            
+            # Morphological operations to clean up technical drawing artifacts
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
+            
+            # Opening to separate connected characters/digits
+            opened = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel)
+            opened_img = Image.fromarray(opened)
+            
+            # Closing to connect broken characters
+            closed = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
+            closed_img = Image.fromarray(closed)
+            
+            for processed_img, suffix in [(opened_img, '_opened'), (closed_img, '_closed')]:
+                for ocr_mode in wire_modes[:2]:  # Try top 2 wire modes
+                    try:
+                        config = get_ocr_config(ocr_mode, language)
+                        text = pytesseract.image_to_string(processed_img, config=config).strip()
+                        result_key = f"[{ocr_mode}{suffix}] {text}"
+                        if text and result_key not in results:
+                            results.append(result_key)
+                    except:
+                        continue
+        except:
+            pass
+        
+        # Clean up results and extract wire measurements
         clean_results = []
+        wire_measurements = []
+        
         for result in results:
             if '] ' in result:
                 clean_text = result.split('] ', 1)[1]
                 if clean_text and clean_text not in clean_results:
                     clean_results.append(clean_text)
+                    
+                    # Check if it looks like a wire measurement (contains digits + m)
+                    import re
+                    if re.search(r'\d+\.?\d*m', clean_text.lower()):
+                        wire_measurements.append(clean_text)
         
-        return results, clean_results
+        return results, clean_results, wire_measurements
     
     except Exception as e:
         st.error(f"Multi-attempt error: {str(e)}")
-        return [], []
+        return [], [], []
 
 def image_to_base64(image):
     """Convert PIL image to base64 string"""
@@ -511,12 +568,14 @@ if uploaded_file is not None:
     ocr_mode = st.sidebar.selectbox(
         "OCR Mode",
         [
+            ('wire_length', '📏 Wire Length Measurements (1484m)'),
+            ('meter_readings', '📐 Meter Readings (Technical)'),
+            ('measurements', '📊 General Measurements'),
+            ('length_only', '📏 Length Only (m, km)'),
             ('numbers_precise', '🔢 Precise Number Recognition'),
-            ('measurements', '📏 Measurements (12.51m, 3.4kg, etc.)'),
             ('handwriting', '📝 Handwriting Optimized'),
             ('print', '🖨️ Printed Text'),
-            ('mixed', '🔀 Mixed Text'),
-            ('single_word', '📄 Single Word')
+            ('mixed', '🔀 Mixed Text')
         ],
         format_func=lambda x: x[1]
     )[0]
@@ -608,11 +667,23 @@ if uploaded_file is not None:
                     
                     cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
                     
-                    with st.spinner("Extracting text..."):
+                    with st.spinner("Extracting wire length..."):
                         result = perform_ocr(cropped_image, ocr_mode, language)
-                        st.session_state.ocr_result = result
+                        
+                        # Post-process result to extract wire measurements
+                        import re
                         if result:
-                            st.success(f"✅ Extracted: {result}")
+                            # Look for wire measurement patterns like "1484m", "12.5m", etc.
+                            wire_pattern = re.findall(r'\d+\.?\d*m', result.lower())
+                            if wire_pattern:
+                                wire_measurement = wire_pattern[0]
+                                st.session_state.ocr_result = wire_measurement
+                                st.success(f"🎯 Wire Length Detected: **{wire_measurement}**")
+                                st.balloons()
+                            else:
+                                st.session_state.ocr_result = result
+                                st.info(f"📝 Extracted: {result}")
+                                st.warning("💡 Tip: Try 'Wire Length Measurements' mode for better results")
                         else:
                             st.warning("No text detected in selection")
                 except Exception as e:
@@ -620,7 +691,7 @@ if uploaded_file is not None:
         
         with col2:
             if st.button("🔄 Multiple Methods", key="multi_btn"):
-                st.info("🔄 Trying multiple extraction methods...")
+                st.info("🔄 Trying multiple wire measurement methods...")
                 try:
                     # Use center area as fallback
                     w, h = st.session_state.enhanced_image.size
@@ -629,20 +700,34 @@ if uploaded_file is not None:
                     
                     cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
                     
-                    with st.spinner("Trying multiple approaches..."):
-                        all_results, clean_results = multi_attempt_ocr(cropped_image, language)
+                    with st.spinner("Analyzing wire measurements..."):
+                        all_results, clean_results, wire_measurements = multi_attempt_ocr(cropped_image, language)
+                        
+                        if wire_measurements:
+                            st.subheader("🎯 Wire Length Measurements Found:")
+                            for i, measurement in enumerate(wire_measurements, 1):
+                                st.success(f"📏 Length {i}: **{measurement}**")
+                            
+                            # Set the best wire measurement as the result
+                            best_measurement = wire_measurements[0]
+                            st.session_state.ocr_result = best_measurement
+                            st.balloons()
                         
                         if all_results:
-                            st.subheader("🔢 Multiple Method Results:")
-                            for i, result in enumerate(all_results, 1):
-                                st.text(f"{i}. {result}")
+                            with st.expander("🔍 All Detection Results", expanded=False):
+                                for i, result in enumerate(all_results, 1):
+                                    st.text(f"{i}. {result}")
+                        
+                        if not wire_measurements and clean_results:
+                            st.warning("⚠️ No wire measurements detected, showing all results:")
+                            for result in clean_results[:3]:  # Show top 3
+                                st.text(f"• {result}")
+                            best_result = max(clean_results, key=len)
+                            st.session_state.ocr_result = best_result
+                        
+                        if not all_results:
+                            st.error("❌ No text detected with any method")
                             
-                            if clean_results:
-                                best_result = max(clean_results, key=len)
-                                st.session_state.ocr_result = best_result
-                                st.success(f"🎯 Best Result: {best_result}")
-                        else:
-                            st.warning("No text detected with any method")
                 except Exception as e:
                     st.error(f"Multiple extraction error: {str(e)}")
         
@@ -696,12 +781,12 @@ with st.expander("💡 How to Use This Tool", expanded=True):
        - Click "Extract Text" button in the selection interface
     5. **📊 Process the selection** using the extraction buttons below
     
-    ### 🎯 Pro Tips:
-    - **For numbers:** Use "Number Recognition Optimized" + "Precise Number Recognition"
-    - **For measurements:** Use "Measurement Text Enhanced" + "Measurements" mode
-    - **Make tight selections** around the text you want to extract
-    - **Try "Multiple Methods"** if single extraction doesn't work well
-    - **The selection tool works on desktop and mobile devices**
+    ### 🎯 Pro Tips for Wire Measurements:
+    - **Best Mode:** Use "Wire Length Measurements (1484m)" for optimal results
+    - **Enhancement:** Try "Number Recognition Optimized" for technical drawings
+    - **Selection:** Make tight selections around the measurement text (like "1484m")
+    - **Multiple Methods:** Use this to try all wire measurement techniques automatically
+    - **The tool will highlight detected wire measurements in green**
     
     ### 🔧 Troubleshooting:
     - If selection doesn't work, try refreshing the page
