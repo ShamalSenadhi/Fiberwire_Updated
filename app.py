@@ -1,17 +1,17 @@
 import streamlit as st
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter, ImageDraw
 import pytesseract
 import io
 import base64
+from PIL import Image, ImageEnhance, ImageFilter
 from scipy import ndimage
 from skimage import morphology, exposure, restoration, filters
 import streamlit.components.v1 as components
 
-# Set page config
+# Configure page
 st.set_page_config(
-    page_title="🔧 Enhanced Image OCR Extractor",
+    page_title="Enhanced Image OCR Extractor",
     page_icon="🔧",
     layout="wide"
 )
@@ -170,13 +170,12 @@ def advanced_image_enhancement(img, method='auto_adaptive'):
 
     elif method == 'wiener_deconvolution':
         # Wiener deconvolution for blur removal
-        try:
-            # Create a motion blur kernel
-            psf = np.ones((5, 5)) / 25
-            result_float = restoration.wiener(gray, psf, balance=0.1)
-            result = (result_float * 255).astype(np.uint8)
-        except:
-            result = gray
+        from skimage import restoration
+
+        # Create a motion blur kernel
+        psf = np.ones((5, 5)) / 25
+        result_float = restoration.wiener(gray, psf, balance=0.1)
+        result = (result_float * 255).astype(np.uint8)
 
     else:
         result = gray
@@ -215,8 +214,8 @@ def get_ocr_config(mode, language):
     }
     return configs.get(mode, configs['numbers_precise'])
 
-def perform_ocr(img, ocr_mode='handwriting', language='eng'):
-    """Perform OCR on the image"""
+def extract_text_from_image(img, ocr_mode='handwriting', language='eng'):
+    """Perform OCR on image"""
     try:
         config = get_ocr_config(ocr_mode, language)
         text = pytesseract.image_to_string(img, config=config)
@@ -226,7 +225,7 @@ def perform_ocr(img, ocr_mode='handwriting', language='eng'):
         return ""
 
 def multi_attempt_ocr(img, language='eng'):
-    """Try multiple OCR approaches on the image with focus on numbers"""
+    """Try multiple OCR approaches with focus on numbers"""
     try:
         results = []
 
@@ -317,422 +316,431 @@ def multi_attempt_ocr(img, language='eng'):
         st.error(f"Multi-attempt error: {str(e)}")
         return [], []
 
-def create_crop_interface():
-    """Create a simpler, more reliable crop interface using Streamlit widgets"""
-    if st.session_state.enhanced_image is None:
-        return None, None, None, None
-    
-    img_width, img_height = st.session_state.enhanced_image.size
-    
-    st.subheader("📐 Crop Selection")
-    st.info("🎯 Use the sliders below to select the area you want to extract text from")
-    
-    # Create two columns for better layout
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.write("**X Position & Width:**")
-        crop_x = st.slider("X Start", 0, img_width-1, 0, key="crop_x")
-        crop_w = st.slider("Width", 1, img_width-crop_x, min(200, img_width-crop_x), key="crop_w")
-    
-    with col2:
-        st.write("**Y Position & Height:**")
-        crop_y = st.slider("Y Start", 0, img_height-1, 0, key="crop_y")
-        crop_h = st.slider("Height", 1, img_height-crop_y, min(100, img_height-crop_y), key="crop_h")
-    
-    # Show crop preview
-    try:
-        cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+def img_to_base64(img):
+    """Convert PIL image to base64 string"""
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    img_str = base64.b64encode(buffer.getvalue()).decode()
+    return f"data:image/png;base64,{img_str}"
+
+def create_canvas_component(img_base64, canvas_id="canvas"):
+    """Create interactive canvas component for image selection"""
+    canvas_html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {{ margin: 0; padding: 10px; font-family: Arial, sans-serif; }}
+            canvas {{ 
+                border: 2px solid #444; 
+                cursor: crosshair; 
+                border-radius: 5px; 
+                box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+                display: block;
+                margin: 0 auto;
+            }}
+            .controls {{ 
+                text-align: center; 
+                margin: 10px 0;
+                display: flex;
+                gap: 10px;
+                justify-content: center;
+                flex-wrap: wrap;
+            }}
+            button {{ 
+                padding: 8px 15px; 
+                border: none; 
+                border-radius: 5px; 
+                cursor: pointer; 
+                font-weight: bold;
+                transition: background-color 0.3s;
+            }}
+            .clear-btn {{ background-color: #6c757d; color: white; }}
+            .clear-btn:hover {{ background-color: #545b62; }}
+            .extract-btn {{ background-color: #007bff; color: white; }}
+            .extract-btn:hover {{ background-color: #0056b3; }}
+            .status {{ 
+                text-align: center; 
+                margin: 10px 0; 
+                padding: 8px; 
+                background-color: #f8f9fa; 
+                border-radius: 5px;
+                font-family: monospace;
+                min-height: 20px;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="status" id="status">Drag on the image to select text areas for OCR extraction</div>
+        <canvas id="{canvas_id}" width="800" height="600"></canvas>
+        <div class="controls">
+            <button class="clear-btn" onclick="clearSelection()">🗑️ Clear Selection</button>
+            <button class="extract-btn" onclick="extractSelection()">✍️ Extract Selected Area</button>
+        </div>
         
-        # Display the cropped preview
-        st.write("**🔍 Crop Preview:**")
-        st.image(cropped_image, caption=f"Cropped Area: {crop_w}×{crop_h} pixels", width=400)
-        
-        return cropped_image, crop_x, crop_y, f"{crop_w}×{crop_h}"
-        
-    except Exception as e:
-        st.error(f"Crop error: {str(e)}")
-        return None, None, None, None
+        <script>
+            const canvas = document.getElementById('{canvas_id}');
+            const ctx = canvas.getContext('2d');
+            const status = document.getElementById('status');
+            
+            let img = new Image();
+            let startX, startY, w, h;
+            let dragging = false;
+            let hasSelection = false;
+            
+            // Load and display image
+            img.onload = function() {{
+                const maxWidth = 800;
+                const maxHeight = 600;
+                let {{ width, height }} = img;
+                
+                // Calculate scaling to fit canvas
+                const scale = Math.min(maxWidth/width, maxHeight/height);
+                const scaledWidth = width * scale;
+                const scaledHeight = height * scale;
+                
+                canvas.width = scaledWidth;
+                canvas.height = scaledHeight;
+                
+                ctx.drawImage(img, 0, 0, scaledWidth, scaledHeight);
+                status.innerText = `Image loaded: ${{scaledWidth.toFixed(0)}}×${{scaledHeight.toFixed(0)}} - Drag to select text areas`;
+            }};
+            
+            img.src = '{img_base64}';
+            
+            // Mouse events for selection
+            canvas.addEventListener('mousedown', function(e) {{
+                dragging = true;
+                hasSelection = false;
+                const rect = canvas.getBoundingClientRect();
+                startX = e.clientX - rect.left;
+                startY = e.clientY - rect.top;
+            }});
+            
+            canvas.addEventListener('mousemove', function(e) {{
+                if (!dragging) return;
+                
+                const rect = canvas.getBoundingClientRect();
+                const mx = e.clientX - rect.left;
+                const my = e.clientY - rect.top;
+                w = mx - startX;
+                h = my - startY;
+                
+                // Redraw image
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                
+                // Draw selection rectangle
+                ctx.strokeStyle = '#ff4444';
+                ctx.lineWidth = 2;
+                ctx.setLineDash([8, 4]);
+                ctx.strokeRect(startX, startY, w, h);
+                
+                ctx.fillStyle = 'rgba(255, 68, 68, 0.1)';
+                ctx.fillRect(startX, startY, w, h);
+                
+                hasSelection = Math.abs(w) > 5 && Math.abs(h) > 5;
+                
+                if (hasSelection) {{
+                    status.innerText = `Selection: ${{Math.abs(w).toFixed(0)}}×${{Math.abs(h).toFixed(0)}} pixels - Ready for OCR`;
+                }}
+            }});
+            
+            canvas.addEventListener('mouseup', function() {{
+                dragging = false;
+            }});
+            
+            function clearSelection() {{
+                hasSelection = false;
+                w = h = 0;
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                status.innerText = 'Selection cleared. Drag to select text areas.';
+            }}
+            
+            function extractSelection() {{
+                if (!hasSelection) {{
+                    alert('Please make a selection first');
+                    return;
+                }}
+                
+                // Calculate crop coordinates
+                const scaleX = img.width / canvas.width;
+                const scaleY = img.height / canvas.height;
+                
+                const cropX = (w > 0 ? startX : startX + w) * scaleX;
+                const cropY = (h > 0 ? startY : startY + h) * scaleY;
+                const cropW = Math.abs(w) * scaleX;
+                const cropH = Math.abs(h) * scaleY;
+                
+                // Create cropped image
+                const cropCanvas = document.createElement('canvas');
+                const cropCtx = cropCanvas.getContext('2d');
+                cropCanvas.width = cropW;
+                cropCanvas.height = cropH;
+                
+                cropCtx.drawImage(img, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+                
+                // Send coordinates to Streamlit
+                const selection = {{
+                    x: Math.round(cropX),
+                    y: Math.round(cropY),
+                    width: Math.round(cropW),
+                    height: Math.round(cropH),
+                    dataURL: cropCanvas.toDataURL('image/png')
+                }};
+                
+                window.parent.postMessage({{
+                    type: 'selection',
+                    data: selection
+                }}, '*');
+                
+                status.innerText = 'Selection sent for OCR processing...';
+            }}
+        </script>
+    </body>
+    </html>
+    """
+    return canvas_html
 
 # Initialize session state
 if 'original_image' not in st.session_state:
     st.session_state.original_image = None
 if 'enhanced_image' not in st.session_state:
     st.session_state.enhanced_image = None
-if 'ocr_result' not in st.session_state:
-    st.session_state.ocr_result = ""
-if 'cropped_image' not in st.session_state:
-    st.session_state.cropped_image = None
+if 'last_result' not in st.session_state:
+    st.session_state.last_result = ""
 
-# Main UI
+# Main app
 st.title("🔧 Enhanced Image OCR Extractor")
-st.markdown("**Optimized for Number Recognition with Advanced Image Enhancement**")
 
-# Sidebar for settings
-st.sidebar.header("⚙️ Settings")
-
-# File upload
-uploaded_file = st.file_uploader(
-    "Upload Image", 
-    type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
-    help="Upload an image containing text or numbers to extract"
-)
-
-if uploaded_file is not None:
-    # Load original image
-    original_image = Image.open(uploaded_file)
-    st.session_state.original_image = original_image
+# Sidebar for controls
+with st.sidebar:
+    st.header("🎨 Image Enhancement")
     
-    # Enhancement settings
-    st.sidebar.subheader("🎨 Image Enhancement")
-    enhancement_method = st.sidebar.selectbox(
+    uploaded_file = st.file_uploader(
+        "Upload Image", 
+        type=['png', 'jpg', 'jpeg', 'bmp', 'tiff'],
+        help="Upload an image for OCR processing"
+    )
+    
+    enhancement_method = st.selectbox(
         "Enhancement Method",
         [
-            ('number_optimized', '🔢 Number Recognition Optimized'),
-            ('measurement_enhanced', '📏 Measurement Text Enhanced'),
-            ('digit_sharpening', '🎯 Digital/Printed Numbers'),
-            ('auto_adaptive', '🤖 Auto Adaptive Enhancement'),
-            ('handwriting_optimized', '✍️ Handwriting Optimized'),
-            ('high_contrast', '⚡ High Contrast Boost'),
-            ('noise_reduction', '🧹 Advanced Noise Reduction'),
-            ('edge_sharpening', '📐 Edge Sharpening'),
-            ('brightness_contrast', '💡 Brightness & Contrast'),
-            ('histogram_equalization', '📊 Histogram Equalization'),
-            ('unsharp_masking', '🔍 Unsharp Masking'),
-            ('morphological', '🔄 Morphological Enhancement'),
-            ('wiener_deconvolution', '🌟 Wiener Deconvolution')
+            "number_optimized", "measurement_enhanced", "digit_sharpening", 
+            "auto_adaptive", "handwriting_optimized", "high_contrast",
+            "noise_reduction", "edge_sharpening", "brightness_contrast",
+            "histogram_equalization", "unsharp_masking", "morphological",
+            "wiener_deconvolution"
         ],
-        format_func=lambda x: x[1]
-    )[0]
+        index=0,
+        help="Choose the best enhancement method for your image type"
+    )
     
-    # OCR settings
-    st.sidebar.subheader("📝 OCR Settings")
-    ocr_mode = st.sidebar.selectbox(
+    enhance_button = st.button("🚀 Generate Enhanced Image", type="primary")
+    
+    st.header("🔢 OCR Settings")
+    
+    ocr_mode = st.selectbox(
         "OCR Mode",
         [
-            ('numbers_precise', '🔢 Precise Number Recognition'),
-            ('measurements', '📏 Measurements (12.51m, 3.4kg, etc.)'),
-            ('scientific_notation', '🧪 Scientific Numbers (1.5e-3, etc.)'),
-            ('currency', '💰 Currency & Financial Numbers'),
-            ('coordinates', '🗺️ Coordinates & GPS Numbers'),
-            ('handwriting', '📝 Handwriting Optimized'),
-            ('print', '🖨️ Printed Text'),
-            ('mixed', '🔀 Mixed Text'),
-            ('numbers', '🔢 Basic Numbers'),
-            ('single_word', '📄 Single Word')
+            "numbers_precise", "measurements", "scientific_notation",
+            "currency", "coordinates", "handwriting", "print", 
+            "mixed", "numbers", "single_word"
         ],
-        format_func=lambda x: x[1]
-    )[0]
+        help="Choose OCR mode based on your text type"
+    )
     
-    language = st.sidebar.selectbox(
+    language = st.selectbox(
         "Language",
-        [
-            ('eng', 'English'),
-            ('eng+ara', 'English + Arabic'),
-            ('eng+chi_sim', 'English + Chinese'),
-            ('eng+fra', 'English + French'),
-            ('eng+deu', 'English + German'),
-            ('eng+spa', 'English + Spanish'),
-            ('eng+rus', 'English + Russian')
-        ],
-        format_func=lambda x: x[1]
-    )[0]
+        ["eng", "eng+ara", "eng+chi_sim", "eng+fra", "eng+deu", "eng+spa", "eng+rus"],
+        help="Select OCR language"
+    )
+
+# Main content area
+if uploaded_file is not None:
+    # Load original image
+    st.session_state.original_image = Image.open(uploaded_file)
     
     # Generate enhanced image
-    if st.sidebar.button("🚀 Generate Enhanced Image", type="primary"):
-        with st.spinner("Generating enhanced image..."):
-            enhanced_image = advanced_image_enhancement(original_image, enhancement_method)
-            st.session_state.enhanced_image = enhanced_image
-            st.sidebar.success("✅ Enhanced image generated!")
+    if enhance_button:
+        with st.spinner("🔄 Generating enhanced image..."):
+            st.session_state.enhanced_image = advanced_image_enhancement(
+                st.session_state.original_image, 
+                enhancement_method
+            )
+        st.success("✅ Enhanced image generated!")
     
-    # Display images
-    col1, col2 = st.columns(2)
+    # Display images side by side
+    if st.session_state.original_image is not None:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Original Image")
+            st.image(st.session_state.original_image, use_column_width=True)
+        
+        with col2:
+            st.subheader("Enhanced Image")
+            if st.session_state.enhanced_image is not None:
+                st.image(st.session_state.enhanced_image, use_column_width=True)
+            else:
+                st.info("Click 'Generate Enhanced Image' to see the enhanced version")
     
-    with col1:
-        st.subheader("📷 Original Image")
-        st.image(original_image, use_column_width=True)
-        st.caption(f"Size: {original_image.size[0]}×{original_image.size[1]}")
-    
-    with col2:
-        if st.session_state.enhanced_image is not None:
-            st.subheader("✨ Enhanced Image")
-            st.image(st.session_state.enhanced_image, use_column_width=True)
-            st.caption(f"Size: {st.session_state.enhanced_image.size[0]}×{st.session_state.enhanced_image.size[1]}")
-        else:
-            st.subheader("✨ Enhanced Image")
-            st.info("Click 'Generate Enhanced Image' to see the enhanced version")
-    
-    # OCR Operations with Working Selection
+    # Interactive canvas for selection (only if enhanced image exists)
     if st.session_state.enhanced_image is not None:
-        st.header("🔍 Text Selection & OCR")
+        st.subheader("🎯 Select Text Areas for OCR")
         
-        # Create the working crop interface
-        cropped_image, crop_x, crop_y, crop_size = create_crop_interface()
+        # Convert enhanced image to base64 for canvas
+        enhanced_b64 = img_to_base64(st.session_state.enhanced_image)
         
-        if cropped_image is not None:
-            st.session_state.cropped_image = cropped_image
-            
-            # OCR Control buttons
-            st.subheader("🎯 OCR Operations")
-            col1, col2, col3 = st.columns(3)
-            
-            with col1:
-                if st.button("✍️ Extract from Selection", type="primary"):
-                    with st.spinner("Extracting text from selection..."):
-                        result = perform_ocr(cropped_image, ocr_mode, language)
-                        st.session_state.ocr_result = result
-                        if result:
-                            st.success(f"🎯 Extracted: {result}")
-                        else:
-                            st.warning("No text detected in selection")
-            
-            with col2:
-                if st.button("🔄 Multiple Attempts on Selection"):
-                    with st.spinner("Trying multiple OCR approaches on selection..."):
-                        all_results, clean_results = multi_attempt_ocr(cropped_image, language)
-                        
-                        st.subheader("🔢 Multiple Attempt Results")
-                        for i, result in enumerate(all_results, 1):
-                            st.text(f"Attempt {i}: {result}")
-                        
-                        if clean_results:
-                            best_result = max(clean_results, key=len)
-                            st.session_state.ocr_result = best_result
-                            st.success(f"🎯 Best Result: {best_result}")
-                        else:
-                            st.warning("No text detected in any attempt")
-            
-            with col3:
-                if st.button("📄 Process Full Enhanced Image"):
-                    with st.spinner("Processing full enhanced image..."):
-                        result = perform_ocr(st.session_state.enhanced_image, ocr_mode, language)
-                        st.session_state.ocr_result = result
-                        if result:
-                            st.success(f"🎯 Full Image: {result}")
-                        else:
-                            st.warning("No text detected in full image")
+        # Create canvas component
+        canvas_html = create_canvas_component(enhanced_b64)
         
-        # Display results
-        if st.session_state.ocr_result:
-            st.header("📋 OCR Results")
-            
-            result_container = st.container()
-            with result_container:
-                st.text_area(
-                    "Extracted Text",
-                    value=st.session_state.ocr_result,
-                    height=150,
-                    key="result_text"
-                )
-                
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("Characters", len(st.session_state.ocr_result))
-                with col2:
-                    st.metric("Words", len(st.session_state.ocr_result.split()))
-                
-                # Copy button functionality
-                if st.button("📋 Copy to Clipboard"):
-                    st.code(st.session_state.ocr_result)
-                    st.success("Text displayed above - you can now copy it!")
-
-# Additional OCR tools section
-if st.session_state.enhanced_image is not None:
-    st.header("🛠️ Advanced OCR Tools")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.subheader("🔢 Batch Number Extraction")
-        if st.button("🎯 Extract All Numbers", help="Automatically detect and extract all numbers from the image"):
-            with st.spinner("Scanning for numbers..."):
-                # Try multiple number-focused OCR modes
-                number_results = []
-                number_modes = ['numbers_precise', 'measurements', 'scientific_notation', 'currency']
-                
-                for mode in number_modes:
-                    try:
-                        result = perform_ocr(st.session_state.enhanced_image, mode, language)
-                        if result and result not in number_results:
-                            number_results.append(f"[{mode}] {result}")
-                    except:
-                        continue
-                
-                if number_results:
-                    st.subheader("📊 All Detected Numbers:")
-                    for result in number_results:
-                        st.text(result)
-                else:
-                    st.warning("No numbers detected")
-    
-    with col2:
-        st.subheader("📝 Quick Text Extraction")
-        if st.button("⚡ Quick OCR (All Text)", help="Fast extraction of all text using optimal settings"):
-            with st.spinner("Quick OCR processing..."):
-                result = perform_ocr(st.session_state.enhanced_image, 'mixed', language)
-                if result:
-                    st.text_area("Quick OCR Result", result, height=100)
-                    st.session_state.ocr_result = result
-                else:
-                    st.warning("No text detected")
-
-# Tips section
-with st.expander("💡 Tips for Better Results"):
-    st.markdown("""
-    ### 🎯 Tips for Better Number Recognition:
-    - **For Pure Numbers:** Use "Number Recognition Optimized" enhancement + "Precise Number Recognition" OCR
-    - **For Measurements:** Use "Measurement Text Enhanced" + "Measurements" mode for "12.51m", "3.4kg", etc.
-    - **For Scientific Numbers:** Use "Scientific Numbers" mode for "1.5e-3", "2.4×10⁵", etc.
-    - **For Currency:** Use "Currency & Financial Numbers" for "$123.45", "€99.99", etc.
-    - **For GPS/Coordinates:** Use "Coordinates & GPS Numbers" for "40.7128°N", etc.
-    - **Digital Displays:** Use "Digital/Printed Numbers" enhancement for LCD/LED numbers
-    - **Best Practice:** Try "Multiple Attempts" - it tests all number recognition methods
-    
-    ### 📐 Using the Selection Tool:
-    - **Slider Controls:** Use the X/Y sliders to position your selection area
-    - **Width/Height:** Adjust the width and height sliders to size your selection
-    - **Preview:** The crop preview shows exactly what will be processed
-    - **Precise Selection:** Make tight selections around the text you want to extract
-    - **Multiple Selections:** You can adjust sliders and extract different areas
-    
-    ### 📋 General Tips:
-    - **Step 1:** Choose the best enhancement method for your image type
-    - **Step 2:** Generate the enhanced image (this is your working canvas)
-    - **Step 3:** Use the sliders to select the text area you want
-    - **Step 4:** Extract text using appropriate OCR mode
-    - Try "Handwriting Optimized" for handwritten notes
-    - Use "High Contrast Boost" for faded or low-contrast text
-    - Compare original vs enhanced to see the improvement
-    """)
-
-# Performance metrics
-if st.session_state.enhanced_image is not None:
-    with st.expander("📊 Image Information"):
+        # Display canvas
+        canvas_result = components.html(canvas_html, height=700)
+        
+        # OCR Controls
+        st.subheader("🔍 OCR Operations")
+        
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            st.metric("Original Size", f"{st.session_state.original_image.size[0]}×{st.session_state.original_image.size[1]}")
+            if st.button("📄 Process Full Enhanced Image", type="secondary"):
+                with st.spinner("🔄 Processing full enhanced image..."):
+                    result = extract_text_from_image(
+                        st.session_state.enhanced_image, 
+                        ocr_mode, 
+                        language
+                    )
+                    st.session_state.last_result = result
         
         with col2:
-            st.metric("Enhanced Size", f"{st.session_state.enhanced_image.size[0]}×{st.session_state.enhanced_image.size[1]}")
+            if st.button("🔄 Multiple Attempts", type="secondary"):
+                with st.spinner("🔄 Trying multiple approaches..."):
+                    detailed_results, clean_results = multi_attempt_ocr(
+                        st.session_state.enhanced_image, 
+                        language
+                    )
+                    
+                    st.subheader("🔢 Multiple Attempt Results")
+                    for i, result in enumerate(detailed_results, 1):
+                        st.text(f"Attempt {i}: {result}")
+                    
+                    if clean_results:
+                        st.subheader("🎯 Clean Results")
+                        for i, result in enumerate(clean_results, 1):
+                            st.text(f"{i}. {result}")
+                        
+                        # Set best result as last result
+                        best_result = max(clean_results, key=len) if clean_results else ""
+                        st.session_state.last_result = best_result
         
         with col3:
-            # Calculate file size difference
-            original_buffer = io.BytesIO()
-            st.session_state.original_image.save(original_buffer, format='PNG')
-            original_size = len(original_buffer.getvalue())
-            
-            enhanced_buffer = io.BytesIO()
-            st.session_state.enhanced_image.save(enhanced_buffer, format='PNG')
-            enhanced_size = len(enhanced_buffer.getvalue())
-            
-            st.metric("Size Change", f"{enhanced_size/original_size:.2f}x")
+            if st.session_state.last_result:
+                if st.button("📋 Copy Result", type="secondary"):
+                    # Note: Clipboard access requires HTTPS in browsers
+                    st.code(st.session_state.last_result)
+                    st.info("Result displayed above - copy manually")
+        
+        # Display last result
+        if st.session_state.last_result:
+            st.subheader("📋 OCR Result")
+            st.text_area(
+                "Extracted Text", 
+                st.session_state.last_result, 
+                height=150,
+                help="The extracted text from OCR processing"
+            )
+        
+        # Handle canvas selection (this would need JavaScript communication)
+        # For now, we'll add a placeholder for manual crop coordinates
+        st.subheader("📐 Manual Crop Selection (Alternative)")
+        st.info("Use the canvas above for interactive selection, or manually specify crop coordinates below:")
+        
+        col1, col2, col3, col4 = st.columns(4)
+        with col1:
+            crop_x = st.number_input("X", min_value=0, value=0)
+        with col2:
+            crop_y = st.number_input("Y", min_value=0, value=0)
+        with col3:
+            crop_w = st.number_input("Width", min_value=1, value=100)
+        with col4:
+            crop_h = st.number_input("Height", min_value=1, value=100)
+        
+        if st.button("✍️ Extract from Manual Coordinates"):
+            if st.session_state.enhanced_image is not None:
+                # Crop the image
+                img_array = np.array(st.session_state.enhanced_image)
+                cropped_array = img_array[crop_y:crop_y+crop_h, crop_x:crop_x+crop_w]
+                
+                if cropped_array.size > 0:
+                    cropped_img = Image.fromarray(cropped_array)
+                    
+                    with st.spinner("🔄 Processing selected area..."):
+                        result = extract_text_from_image(cropped_img, ocr_mode, language)
+                        st.session_state.last_result = result
+                    
+                    # Display cropped area
+                    st.image(cropped_img, caption="Cropped Area", width=300)
+                else:
+                    st.error("Invalid crop coordinates!")
 
-# Footer
-st.markdown("---")
-st.markdown("🔧 **Enhanced Image OCR Extractor** - Optimized for Number Recognition with Advanced Image Enhancement")
-st.markdown("### 🔧 Features:")
-st.markdown("""
-- ✨ **13 Advanced Enhancement Methods** - Specialized algorithms for different image types
-- 🔢 **10 Specialized OCR Modes** - Optimized for numbers, measurements, currency, and more
-- 📐 **Reliable Slider-Based Selection** - Easy-to-use sliders for precise area selection
-- 🔄 **Multiple Attempt Mode** - Tries all methods automatically for best results
-- 🌍 **Multi-language Support** - Support for multiple languages
-- 📊 **Real-time Comparison** - See original vs enhanced images side by side
-- 🎯 **Live Preview** - See exactly what area you're selecting before OCR
-""")
+else:
+    # Welcome message and instructions
+    st.info("📁 Upload an image to get started!")
+    
+    # Tips section
+    with st.expander("💡 Tips for Better Results", expanded=True):
+        st.markdown("""
+        ### 🎯 NEW WORKFLOW:
+        1. **Upload your original image**
+        2. **Choose enhancement method and generate enhanced image**
+        3. **Compare original vs enhanced image**
+        4. **Work on the enhanced image for all OCR operations**
+        5. **Select text areas or process full enhanced image**
 
-# Quick Start Guide
-with st.expander("🚀 Quick Start Guide"):
-    st.markdown("""
-    ### 🎯 Getting Started in 4 Simple Steps:
-    
-    **1. Upload Your Image** 📁
-    - Click "Browse files" and upload your image
-    - Supports PNG, JPG, JPEG, TIFF, BMP formats
-    
-    **2. Choose Enhancement Method** 🎨
-    - For numbers/measurements: Select "Number Recognition Optimized"
-    - For handwriting: Select "Handwriting Optimized"  
-    - For general text: Select "Auto Adaptive Enhancement"
-    - Click "Generate Enhanced Image"
-    
-    **3. Select Text Area** 📐
-    - Use the X/Y sliders to position your selection
-    - Use Width/Height sliders to size your selection
-    - Watch the preview to see exactly what you're selecting
-    
-    **4. Extract Text** ✍️
-    - Choose appropriate OCR mode (e.g., "Precise Number Recognition" for numbers)
-    - Click "Extract from Selection" or "Multiple Attempts" for best results
-    - Copy your extracted text from the results box
-    
-    ### 🎯 Pro Tips:
-    - For **best number recognition**: Use "Number Recognition Optimized" + "Precise Number Recognition"
-    - For **unclear text**: Try "Multiple Attempts" - it tests many different approaches
-    - For **small text**: Make your selection as tight as possible around the text
-    - For **mixed content**: Use "Process Full Enhanced Image" first to see what's detected
-    """)
+        ### 🔢 NUMBER RECOGNITION ENHANCEMENTS:
+        - **Number Recognition Optimized** - Best for pure numbers and digits
+        - **Measurement Text Enhanced** - Perfect for measurements like '12.51m', '3.4kg'
+        - **Digital/Printed Numbers** - Optimized for LCD/LED displays and printed digits
 
-# Debug information (only show if needed)
-if st.checkbox("🔧 Show Debug Info", help="Show technical information for troubleshooting"):
-    st.subheader("Debug Information")
-    st.write("Session State Keys:", list(st.session_state.keys()))
-    if st.session_state.enhanced_image:
-        st.write("Enhanced Image Mode:", st.session_state.enhanced_image.mode)
-        st.write("Enhanced Image Format:", getattr(st.session_state.enhanced_image, 'format', 'Unknown'))
-    
-    # Test Tesseract
-    if st.button("🧪 Test Tesseract Installation"):
-        try:
-            version = pytesseract.get_tesseract_version()
-            st.success(f"✅ Tesseract Version: {version}")
-            
-            # Create a simple test image
-            test_img = Image.new('RGB', (200, 50), color='white')
-            draw = ImageDraw.Draw(test_img)
-            draw.text((10, 10), "Test 12345", fill='black')
-            
-            test_result = pytesseract.image_to_string(test_img, config='--psm 8')
-            st.info(f"Test OCR Result: '{test_result.strip()}'")
-            
-        except Exception as e:
-            st.error(f"❌ Tesseract Error: {e}")
-            st.info("Please ensure Tesseract is properly installed. See setup instructions in the README.")
+        ### 🎯 SPECIALIZED OCR MODES FOR NUMBERS:
+        - **Precise Number Recognition** - Pure numbers with decimal points
+        - **Measurements** - Numbers with units (m, kg, cm, ft, etc.)
+        - **Scientific Numbers** - Scientific notation (1.5e-3, 2×10⁵)
+        - **Currency** - Money amounts ($123.45, €99.99, ¥1000)
+        - **Coordinates** - GPS coordinates (40.7128°N, -74.0060°W)
 
-# Additional helper section for common issues
-with st.expander("🔧 Troubleshooting Common Issues"):
-    st.markdown("""
-    ### 📋 Common Issues & Solutions:
-    
-    **No text detected?** 🤔
-    - Try different enhancement methods (Number Optimized, High Contrast, etc.)
-    - Make sure your selection is tight around the text
-    - Try "Multiple Attempts" mode
-    - Check if text is too small or blurry
-    
-    **Numbers not recognized correctly?** 🔢
-    - Use "Number Recognition Optimized" enhancement
-    - Select "Precise Number Recognition" OCR mode
-    - For measurements like "12.5kg", use "Measurements" mode
-    - Make selection as close to the numbers as possible
-    
-    **Handwriting not working?** ✍️
-    - Use "Handwriting Optimized" enhancement
-    - Select "Handwriting Optimized" OCR mode
-    - Ensure handwriting is clear and not too cursive
-    - Try increasing contrast if handwriting is faint
-    
-    **App running slowly?** ⏱️
-    - Large images take more time to process
-    - Try smaller crop selections instead of full image
-    - Some enhancement methods are more computationally intensive
-    
-    **Tesseract errors?** ⚠️
-    - Check the debug section to test Tesseract installation
-    - Make sure all required dependencies are installed
-    - Try different OCR modes if one fails
-    """)
+        ### 🎨 OTHER ENHANCEMENT METHODS:
+        - **Auto Adaptive Enhancement** - Best overall results
+        - **Handwriting Optimized** - Specifically for handwritten text
+        - **High Contrast Boost** - For faded or low-contrast images
+        - **Advanced Noise Reduction** - For noisy/grainy images
+        - **Edge Sharpening** - For blurry text
+        - **Brightness & Contrast** - Basic adjustments
+        - **Histogram Equalization** - Better light distribution
+        - **Unsharp Masking** - Professional sharpening
+        - **Morphological Enhancement** - Structure-based improvement
+        - **Wiener Deconvolution** - Advanced blur removal
 
-st.markdown("---")
-st.markdown("**Made with ❤️ using Streamlit, OpenCV, and Tesseract OCR**")
+        ### 📖 BEST PRACTICES FOR NUMBERS:
+        ✓ Use 'Number Recognition Optimized' enhancement for best number clarity  
+        ✓ Choose the right OCR mode for your number type  
+        ✓ Select tight crops around just the numbers you need  
+        ✓ Try 'Multiple Attempts' - it tests all number recognition methods  
+        ✓ Enhanced image provides significantly better number accuracy  
+        ✓ Compare original vs enhanced to see digit improvement  
+        """)
+
+# JavaScript for handling canvas selection
+components.html("""
+<script>
+window.addEventListener('message', function(event) {
+    if (event.data.type === 'selection') {
+        // Send selection data to Streamlit
+        console.log('Selection received:', event.data.data);
+        // You can use Streamlit's JavaScript API to send data back
+    }
+});
+</script>
+""", height=0)
