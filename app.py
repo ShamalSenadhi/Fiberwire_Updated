@@ -87,7 +87,7 @@ def advanced_number_enhancement(img, method='precision_numbers'):
         kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1))
         result = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_clean)
         
-    else:  # ultra_sharp
+    elif method == 'ultra_sharp':
         # Ultra-sharp enhancement for small or blurry numbers
         # Unsharp masking
         gaussian = cv2.GaussianBlur(gray, (0, 0), 2.0)
@@ -106,6 +106,143 @@ def advanced_number_enhancement(img, method='precision_numbers'):
         
         # Adaptive threshold
         result = cv2.adaptiveThreshold(normalized.astype(np.uint8), 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
+        
+    elif method == 'blueprint_mode':
+        # Specialized for blue/white technical blueprints
+        # Convert to LAB color space for better contrast
+        lab = cv2.cvtColor(cv_img, cv2.COLOR_BGR2LAB)
+        l_channel = lab[:,:,0]
+        
+        # CLAHE on L channel
+        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
+        l_channel = clahe.apply(l_channel)
+        
+        # Reconstruct and convert back
+        lab[:,:,0] = l_channel
+        enhanced_bgr = cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
+        enhanced_gray = cv2.cvtColor(enhanced_bgr, cv2.COLOR_BGR2GRAY)
+        
+        # Morphological operations for text enhancement
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
+        tophat = cv2.morphologyEx(enhanced_gray, cv2.MORPH_TOPHAT, kernel)
+        result = cv2.add(enhanced_gray, tophat)
+        
+    elif method == 'handwritten_digits':
+        # Optimized for handwritten measurements
+        # Gentle noise reduction
+        denoised = cv2.fastNlMeansDenoising(gray, h=8)
+        
+        # Gamma correction for better visibility
+        gamma = 1.2
+        inv_gamma = 1.0 / gamma
+        table = np.array([((i / 255.0) ** inv_gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+        gamma_corrected = cv2.LUT(denoised, table)
+        
+        # Slight blur to connect broken strokes
+        blurred = cv2.GaussianBlur(gamma_corrected, (2, 2), 0)
+        
+        # Adaptive threshold with larger block size for handwriting
+        result = cv2.adaptiveThreshold(blurred, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 15, 3)
+        
+    elif method == 'high_dpi_scan':
+        # Optimized for high-resolution scanned documents
+        # Resize for processing if image is very large
+        h, w = gray.shape
+        if w > 2000 or h > 2000:
+            scale = min(2000/w, 2000/h)
+            new_w, new_h = int(w * scale), int(h * scale)
+            gray = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        
+        # Multi-scale retinex for illumination normalization
+        def single_scale_retinex(img, sigma):
+            retinex = np.log10(img + 1.0) - np.log10(cv2.GaussianBlur(img, (0, 0), sigma) + 1.0)
+            return retinex
+        
+        # Apply retinex with multiple scales
+        gray_float = gray.astype(np.float64) + 1.0
+        retinex1 = single_scale_retinex(gray_float, 15)
+        retinex2 = single_scale_retinex(gray_float, 80)
+        retinex3 = single_scale_retinex(gray_float, 250)
+        retinex = (retinex1 + retinex2 + retinex3) / 3.0
+        
+        # Normalize and convert back
+        retinex = np.clip((retinex - retinex.min()) * 255 / (retinex.max() - retinex.min()), 0, 255)
+        result = retinex.astype(np.uint8)
+        
+    elif method == 'low_contrast_boost':
+        # For faded or low-contrast measurements
+        # Histogram equalization
+        equalized = cv2.equalizeHist(gray)
+        
+        # CLAHE with high clip limit
+        clahe = cv2.createCLAHE(clipLimit=6.0, tileGridSize=(4,4))
+        clahe_applied = clahe.apply(gray)
+        
+        # Combine both methods
+        combined = cv2.addWeighted(equalized, 0.6, clahe_applied, 0.4, 0)
+        
+        # Sharpening
+        kernel = np.array([[0,-1,0], [-1,5,-1], [0,-1,0]])
+        result = cv2.filter2D(combined, -1, kernel)
+        
+    elif method == 'wire_diagram_special':
+        # Specialized for electrical wire diagrams
+        # Edge detection to find text regions
+        edges = cv2.Canny(gray, 50, 150)
+        
+        # Dilate edges to connect nearby text
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        dilated_edges = cv2.dilate(edges, kernel, iterations=1)
+        
+        # Use edges as mask for enhancement
+        masked = cv2.bitwise_and(gray, gray, mask=dilated_edges)
+        
+        # Enhance the masked regions
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        enhanced_masked = clahe.apply(masked)
+        
+        # Combine with original
+        result = cv2.addWeighted(gray, 0.7, enhanced_masked, 0.3, 0)
+        
+    elif method == 'measurement_tape':
+        # Optimized for measuring tape/ruler images
+        # Enhance horizontal and vertical lines separately
+        # Horizontal enhancement
+        kernel_h = cv2.getStructuringElement(cv2.MORPH_RECT, (15, 1))
+        morph_h = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel_h)
+        
+        # Vertical enhancement  
+        kernel_v = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 15))
+        morph_v = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel_v)
+        
+        # Combine
+        combined = cv2.add(morph_h, morph_v)
+        
+        # Subtract from original to enhance text
+        result = cv2.subtract(gray, combined)
+        
+        # Final contrast boost
+        result = cv2.convertScaleAbs(result, alpha=2.0, beta=0)
+        
+    else:  # advanced_multi_stage (default fallback)
+        # Advanced multi-stage processing combining best techniques
+        # Stage 1: Noise reduction
+        denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+        
+        # Stage 2: Contrast enhancement
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+        enhanced = clahe.apply(denoised)
+        
+        # Stage 3: Unsharp masking
+        gaussian = cv2.GaussianBlur(enhanced, (0, 0), 1.5)
+        unsharp = cv2.addWeighted(enhanced, 1.8, gaussian, -0.8, 0)
+        
+        # Stage 4: Morphological operations
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        opened = cv2.morphologyEx(unsharp, cv2.MORPH_OPEN, kernel)
+        
+        # Stage 5: Final normalization
+        result = cv2.normalize(opened, None, 0, 255, cv2.NORM_MINMAX)
     
     # Convert back to RGB
     if len(result.shape) == 2:
@@ -765,18 +902,41 @@ if uploaded_file is not None:
     st.session_state.original_image = original_image
     
     # Enhanced settings sidebar
-    st.sidebar.subheader("🎨 Precision Enhancement")
+    st.sidebar.subheader("🎨 Advanced Enhancement Methods")
     enhancement_method = st.sidebar.selectbox(
-        "Enhancement Method",
+        "Choose Enhancement Method",
         [
-            ('precision_numbers', '🎯 Precision Number Recognition'),
-            ('technical_drawing', '📐 Technical Drawing Optimized'),
-            ('meter_scale', '📏 Measurement Scale Enhanced'),
+            ('precision_numbers', '🎯 Precision Number Recognition (Recommended)'),
+            ('technical_drawing', '📐 Technical Drawing & Blueprints'),
+            ('meter_scale', '📏 Measurement Scales & Rulers'),
             ('ultra_sharp', '⚡ Ultra-Sharp Enhancement'),
+            ('blueprint_mode', '🔵 Blueprint & CAD Drawings'),
+            ('handwritten_digits', '✍️ Handwritten Measurements'),  
+            ('high_dpi_scan', '📋 High-Resolution Scanned Documents'),
+            ('low_contrast_boost', '🔆 Low Contrast & Faded Text'),
+            ('wire_diagram_special', '🔌 Electrical Wire Diagrams'),
+            ('measurement_tape', '📐 Measuring Tape & Rulers'),
+            ('advanced_multi_stage', '🚀 Advanced Multi-Stage Processing'),
         ],
         format_func=lambda x: x[1],
-        help="Choose enhancement method based on your image type"
-    )[0]
+        help="Select the enhancement method that best matches your image type for optimal results"
+    # Method description
+    method_descriptions = {
+        'precision_numbers': "🎯 **Best for:** Sharp digital measurements, printed numbers on technical drawings",
+        'technical_drawing': "📐 **Best for:** CAD drawings, engineering blueprints, technical schematics", 
+        'meter_scale': "📏 **Best for:** Ruler measurements, measuring tape readings, scale markings",
+        'ultra_sharp': "⚡ **Best for:** Blurry images, small text, low-resolution measurements",
+        'blueprint_mode': "🔵 **Best for:** Blue/white technical blueprints, architectural drawings",
+        'handwritten_digits': "✍️ **Best for:** Hand-written measurements, field notes, manual markings",
+        'high_dpi_scan': "📋 **Best for:** High-resolution scanned documents, detailed technical papers",
+        'low_contrast_boost': "🔆 **Best for:** Faded text, low-contrast images, old documents",
+        'wire_diagram_special': "🔌 **Best for:** Electrical diagrams, wire schematics, cable layouts",
+        'measurement_tape': "📐 **Best for:** Measuring tapes, rulers with grid lines, calibrated scales", 
+        'advanced_multi_stage': "🚀 **Best for:** Complex images, multiple text types, challenging conditions"
+    }
+    
+    if enhancement_method in method_descriptions:
+        st.sidebar.info(method_descriptions[enhancement_method])
     
     # OCR precision settings
     st.sidebar.subheader("🔍 OCR Precision")
@@ -825,6 +985,59 @@ if uploaded_file is not None:
             st.session_state.enhanced_image = enhanced_image
             st.sidebar.success("✅ Precision enhanced image ready!")
             st.balloons()
+    
+    # Enhancement preview section
+    with st.sidebar.expander("👁️ Preview Enhancement Methods", expanded=False):
+        if st.button("🔍 Generate Preview Comparison", key="preview_btn"):
+            with st.spinner("Generating preview comparison..."):
+                st.subheader("🔍 Enhancement Methods Comparison")
+                
+                # Create a smaller version for faster processing
+                preview_size = (400, 300)
+                preview_original = original_image.copy()
+                preview_original.thumbnail(preview_size, Image.Resampling.LANCZOS)
+                
+                # Generate previews for top methods
+                preview_methods = [
+                    ('precision_numbers', '🎯 Precision Numbers'),
+                    ('technical_drawing', '📐 Technical Drawing'),
+                    ('ultra_sharp', '⚡ Ultra Sharp'),
+                    ('blueprint_mode', '🔵 Blueprint Mode'),
+                    ('low_contrast_boost', '🔆 Contrast Boost'),
+                    ('wire_diagram_special', '🔌 Wire Diagram')
+                ]
+                
+                # Display in 2 columns
+                for i in range(0, len(preview_methods), 2):
+                    col1, col2 = st.columns(2)
+                    
+                    # First method
+                    if i < len(preview_methods):
+                        method_key, method_name = preview_methods[i]
+                        try:
+                            preview_enhanced = advanced_number_enhancement(preview_original, method_key)
+                            with col1:
+                                st.write(f"**{method_name}**")
+                                st.image(preview_enhanced, use_container_width=True)
+                        except Exception as e:
+                            with col1:
+                                st.write(f"**{method_name}**")
+                                st.error(f"Preview error: {str(e)[:50]}...")
+                    
+                    # Second method  
+                    if i + 1 < len(preview_methods):
+                        method_key, method_name = preview_methods[i + 1]
+                        try:
+                            preview_enhanced = advanced_number_enhancement(preview_original, method_key)
+                            with col2:
+                                st.write(f"**{method_name}**")
+                                st.image(preview_enhanced, use_container_width=True)
+                        except Exception as e:
+                            with col2:
+                                st.write(f"**{method_name}**")
+                                st.error(f"Preview error: {str(e)[:50]}...")
+                
+                st.info("💡 Choose the method that makes your measurements most clear and readable!")
     
     # Display images side by side
     col1, col2 = st.columns(2)
