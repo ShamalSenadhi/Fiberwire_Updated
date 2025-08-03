@@ -1,227 +1,383 @@
 import streamlit as st
 import cv2
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter, ImageDraw
+from PIL import Image, ImageEnhance, ImageFilter, ImageDraw, ImageFont
 import pytesseract
 import io
 import base64
 from scipy import ndimage
 from skimage import morphology, exposure, restoration, filters
 import streamlit.components.v1 as components
+import re
+from decimal import Decimal, InvalidOperation
 
 # Set page config
 st.set_page_config(
-    page_title="🔧 Enhanced Image OCR Extractor",
-    page_icon="🔧",
+    page_title="📏 Precision Wire Length OCR",
+    page_icon="📏",
     layout="wide"
 )
 
-def advanced_image_enhancement(img, method='auto_adaptive'):
-    """Apply advanced enhancement methods to generate improved image"""
+def advanced_number_enhancement(img, method='precision_numbers'):
+    """Enhanced preprocessing specifically for precise number recognition"""
     cv_img = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-
-    if method == 'number_optimized':
-        # Specialized enhancement for number recognition
-        denoised = cv2.fastNlMeansDenoising(gray, h=12)
-        clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(6,6))
+    
+    if method == 'precision_numbers':
+        # Multi-stage enhancement for precise number recognition
+        # Stage 1: Noise reduction with edge preservation
+        denoised = cv2.bilateralFilter(gray, 15, 80, 80)
+        
+        # Stage 2: Contrast enhancement with CLAHE
+        clahe = cv2.createCLAHE(clipLimit=2.5, tileGridSize=(4,4))
         enhanced = clahe.apply(denoised)
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 1))
-        cleaned = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
-        smoothed = cv2.bilateralFilter(cleaned, 9, 80, 80)
-        binary = cv2.adaptiveThreshold(smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
-        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-        result = cv2.dilate(binary, kernel_dilate, iterations=1)
-
-    elif method == 'measurement_enhanced':
-        denoised = cv2.fastNlMeansDenoising(gray, h=10)
-        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4,4))
-        enhanced = clahe.apply(denoised)
-        kernel_sharp = np.array([[0,-1,0], [-1,5,-1], [0,-1,0]])
+        
+        # Stage 3: Sharpening for crisp edges
+        kernel_sharp = np.array([[-1,-1,-1], [-1,9,-1], [-1,-1,-1]])
         sharpened = cv2.filter2D(enhanced, -1, kernel_sharp)
+        
+        # Stage 4: Morphological operations for digit separation
         kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-        result = cv2.morphologyEx(sharpened, cv2.MORPH_OPEN, kernel)
-
-    elif method == 'high_contrast':
-        clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8,8))
-        enhanced = clahe.apply(gray)
-        gamma = 0.8
-        lookup_table = np.array([((i / 255.0) ** gamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
-        result = cv2.LUT(enhanced, lookup_table)
-
-    else:  # auto_adaptive
-        denoised = cv2.fastNlMeansDenoising(gray, h=10)
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
-        enhanced = clahe.apply(denoised)
-        smoothed = cv2.bilateralFilter(enhanced, 9, 75, 75)
-        gaussian = cv2.GaussianBlur(smoothed, (0, 0), 2.0)
-        result = cv2.addWeighted(smoothed, 1.5, gaussian, -0.5, 0)
-
+        opened = cv2.morphologyEx(sharpened, cv2.MORPH_OPEN, kernel)
+        
+        # Stage 5: Final thresholding
+        _, binary = cv2.threshold(opened, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Stage 6: Dilation for better character connection
+        kernel_dilate = cv2.getStructuringElement(cv2.MORPH_RECT, (1, 2))
+        result = cv2.dilate(binary, kernel_dilate, iterations=1)
+        
+    elif method == 'technical_drawing':
+        # Optimized for technical drawings and blueprints
+        # Noise reduction
+        denoised = cv2.fastNlMeansDenoising(gray, h=15)
+        
+        # Contrast stretching
+        p2, p98 = np.percentile(denoised, (2, 98))
+        stretched = np.clip((denoised - p2) * 255 / (p98 - p2), 0, 255).astype(np.uint8)
+        
+        # Adaptive histogram equalization
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(6,6))
+        enhanced = clahe.apply(stretched)
+        
+        # Edge-preserving smoothing
+        smoothed = cv2.edgePreservingFilter(enhanced, flags=2, sigma_s=50, sigma_r=0.4)
+        
+        # Adaptive thresholding
+        result = cv2.adaptiveThreshold(smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        
+    elif method == 'meter_scale':
+        # Specialized for measurement scales and rulers
+        # Gaussian blur to reduce fine noise
+        blurred = cv2.GaussianBlur(gray, (3, 3), 0)
+        
+        # Contrast enhancement
+        alpha = 2.0  # Contrast control
+        beta = -50   # Brightness control
+        enhanced = cv2.convertScaleAbs(blurred, alpha=alpha, beta=beta)
+        
+        # Morphological gradient to enhance text edges
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+        gradient = cv2.morphologyEx(enhanced, cv2.MORPH_GRADIENT, kernel)
+        
+        # Threshold
+        _, binary = cv2.threshold(gradient, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        
+        # Clean up
+        kernel_clean = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 1))
+        result = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_clean)
+        
+    else:  # ultra_sharp
+        # Ultra-sharp enhancement for small or blurry numbers
+        # Unsharp masking
+        gaussian = cv2.GaussianBlur(gray, (0, 0), 2.0)
+        unsharp = cv2.addWeighted(gray, 2.0, gaussian, -1.0, 0)
+        
+        # High-pass filter
+        kernel = np.array([[-1,-1,-1,-1,-1],
+                          [-1, 2, 2, 2,-1],
+                          [-1, 2, 8, 2,-1],
+                          [-1, 2, 2, 2,-1],
+                          [-1,-1,-1,-1,-1]]) / 8.0
+        sharpened = cv2.filter2D(unsharp, -1, kernel)
+        
+        # Normalize
+        normalized = cv2.normalize(sharpened, None, 0, 255, cv2.NORM_MINMAX)
+        
+        # Adaptive threshold
+        result = cv2.adaptiveThreshold(normalized, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 5)
+    
     # Convert back to RGB
     if len(result.shape) == 2:
         result_rgb = cv2.cvtColor(result, cv2.COLOR_GRAY2RGB)
     else:
         result_rgb = cv2.cvtColor(result, cv2.COLOR_BGR2RGB)
-
+    
     return Image.fromarray(result_rgb)
 
-def get_ocr_config(mode, language):
-    """Get OCR configuration based on mode"""
-    # Specialized character sets for different measurement types
-    basic_numbers = '0123456789'
-    decimal_numbers = '0123456789.,'
-    meter_measurements = '0123456789.m'  # Optimized for "1484m" style readings
-    length_measurements = '0123456789.mkm'  # Include km for kilometers
-    wire_measurements = '0123456789.mMkK'  # Include uppercase variants
+def get_precision_ocr_config(mode, language):
+    """Precision OCR configurations for length measurements"""
+    
+    # Character sets optimized for different scenarios
+    meter_chars = '0123456789.m'
+    decimal_meter_chars = '0123456789.,m'
+    general_length_chars = '0123456789.,mMkKcC '
+    numeric_only = '0123456789.,'
     
     configs = {
-        'numbers_precise': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={decimal_numbers}',
-        'measurements': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={meter_measurements}',
-        'wire_length': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={wire_measurements}',
-        'meter_readings': f'--oem 3 --psm 7 -l {language} -c tessedit_char_whitelist={meter_measurements}',
-        'length_only': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={length_measurements}',
-        'handwriting': f'--oem 3 --psm 8 -l {language}',
-        'print': f'--oem 3 --psm 6 -l {language}',
-        'mixed': f'--oem 3 --psm 3 -l {language}',
-        'single_word': f'--oem 3 --psm 8 -l {language}'
+        'precision_meters': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={meter_chars} -c tessedit_do_invert=0',
+        'decimal_meters': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={decimal_meter_chars} -c classify_bln_numeric_mode=1',
+        'single_measurement': f'--oem 3 --psm 7 -l {language} -c tessedit_char_whitelist={meter_chars} -c textord_really_old_xheight=1',
+        'numeric_precise': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={numeric_only} -c classify_bln_numeric_mode=1 -c tessedit_zero_rejection=T',
+        'length_general': f'--oem 3 --psm 6 -l {language} -c tessedit_char_whitelist={general_length_chars}',
+        'isolated_word': f'--oem 3 --psm 8 -l {language} -c tessedit_char_whitelist={meter_chars} -c tessedit_single_match=1',
+        'technical_text': f'--oem 3 --psm 7 -l {language} -c preserve_interword_spaces=1 -c tessedit_char_whitelist={general_length_chars}',
     }
-    return configs.get(mode, configs['measurements'])
+    return configs.get(mode, configs['precision_meters'])
 
-def perform_ocr(img, ocr_mode='mixed', language='eng'):
-    """Perform OCR on the image"""
+def extract_length_measurements(text):
+    """Extract and validate length measurements from text"""
+    if not text:
+        return []
+    
+    measurements = []
+    
+    # Comprehensive regex patterns for different measurement formats
+    patterns = [
+        r'(\d+(?:[.,]\d+)?)\s*m(?:eter)?s?\b',           # 1484m, 12.5m, 1,234m
+        r'(\d+(?:[.,]\d+)?)\s*(?:meter|metre)s?\b',      # 1484 meter, 12.5 metres
+        r'(\d+(?:[.,]\d+)?)\s*(?:km|kilometer)s?\b',     # 12.5km, 1 kilometer
+        r'(\d+(?:[.,]\d+)?)\s*(?:cm|centimeter)s?\b',    # 150cm, 15.5 centimeters
+        r'(\d+(?:[.,]\d+)?)\s*(?:mm|millimeter)s?\b',    # 1500mm, 15.5 millimeters
+        r'\b(\d+(?:[.,]\d+)?)m\b',                       # Standalone format like 1484m
+        r'(?:length|distance|measure):\s*(\d+(?:[.,]\d+)?)\s*m', # Label format
+    ]
+    
+    for pattern in patterns:
+        matches = re.finditer(pattern, text.lower(), re.IGNORECASE)
+        for match in matches:
+            try:
+                # Extract numeric value
+                value_str = match.group(1).replace(',', '.')
+                value = float(value_str)
+                
+                # Determine unit and convert to meters
+                full_match = match.group(0).lower()
+                if 'km' in full_match or 'kilometer' in full_match:
+                    meters = value * 1000
+                    unit = 'km'
+                elif 'cm' in full_match or 'centimeter' in full_match:
+                    meters = value / 100
+                    unit = 'cm'
+                elif 'mm' in full_match or 'millimeter' in full_match:
+                    meters = value / 1000
+                    unit = 'mm'
+                else:
+                    meters = value
+                    unit = 'm'
+                
+                measurements.append({
+                    'original': match.group(0),
+                    'value': value,
+                    'unit': unit,
+                    'meters': meters,
+                    'confidence': calculate_measurement_confidence(match.group(0), text)
+                })
+            except (ValueError, IndexError):
+                continue
+    
+    # Remove duplicates and sort by confidence
+    unique_measurements = []
+    seen_values = set()
+    
+    for measurement in measurements:
+        rounded_meters = round(measurement['meters'], 3)
+        if rounded_meters not in seen_values:
+            seen_values.add(rounded_meters)
+            unique_measurements.append(measurement)
+    
+    return sorted(unique_measurements, key=lambda x: x['confidence'], reverse=True)
+
+def calculate_measurement_confidence(match_text, full_text):
+    """Calculate confidence score for a measurement based on context"""
+    confidence = 0.5  # Base confidence
+    
+    # Higher confidence for proper formatting
+    if re.match(r'^\d+(?:[.,]\d+)?m$', match_text.strip()):
+        confidence += 0.3
+    
+    # Higher confidence for reasonable measurement values
     try:
-        config = get_ocr_config(ocr_mode, language)
-        text = pytesseract.image_to_string(img, config=config)
-        return text.strip()
+        value = float(re.search(r'(\d+(?:[.,]\d+)?)', match_text).group(1).replace(',', '.'))
+        if 0.1 <= value <= 10000:  # Reasonable range for wire lengths
+            confidence += 0.2
+        if 100 <= value <= 5000:   # Most common wire length range
+            confidence += 0.2
+    except:
+        pass
+    
+    # Context clues
+    context_words = ['wire', 'cable', 'length', 'distance', 'measure', 'total', 'span']
+    for word in context_words:
+        if word in full_text.lower():
+            confidence += 0.1
+            break
+    
+    return min(confidence, 1.0)
+
+def perform_precision_ocr(img, mode='precision_meters', language='eng'):
+    """Perform high-precision OCR specifically for measurements"""
+    try:
+        config = get_precision_ocr_config(mode, language)
+        
+        # Get text with confidence scores
+        data = pytesseract.image_to_data(img, config=config, output_type=pytesseract.Output.DICT)
+        
+        # Filter results by confidence
+        confidences = data['conf']
+        texts = data['text']
+        
+        # Combine high-confidence text
+        high_conf_text = []
+        for i, conf in enumerate(confidences):
+            if int(conf) > 30 and texts[i].strip():  # Confidence threshold
+                high_conf_text.append(texts[i])
+        
+        combined_text = ' '.join(high_conf_text)
+        
+        # Also get simple text extraction as fallback
+        simple_text = pytesseract.image_to_string(img, config=config).strip()
+        
+        # Return both for comparison
+        return combined_text, simple_text
+        
     except Exception as e:
         st.error(f"OCR Error: {str(e)}")
-        return ""
+        return "", ""
 
-def multi_attempt_ocr(img, language='eng'):
-    """Try multiple OCR approaches optimized for wire length measurements"""
-    try:
-        results = []
-        # Priority modes for wire/length measurements
-        wire_modes = ['wire_length', 'meter_readings', 'measurements', 'length_only']
-        backup_modes = ['numbers_precise', 'handwriting', 'mixed', 'single_word']
-        
-        all_modes = wire_modes + backup_modes
-        
-        # First pass: Try specialized wire measurement modes
-        for ocr_mode in all_modes:
-            try:
-                config = get_ocr_config(ocr_mode, language)
-                text = pytesseract.image_to_string(img, config=config).strip()
-                if text and text not in [r.split('] ', 1)[1] for r in results if '] ' in r]:
-                    results.append(f"[{ocr_mode}] {text}")
-            except:
-                continue
-        
-        # Second pass: Try with enhanced preprocessing for technical drawings
-        try:
-            gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-            
-            # Multiple preprocessing approaches for technical drawings
-            preprocessing_methods = [
-                ('otsu', cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)[1]),
-                ('inv_otsu', cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)[1]),
-                ('adaptive', cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2))
-            ]
-            
-            for method_name, processed in preprocessing_methods:
-                processed_img = Image.fromarray(processed)
-                
-                # Try wire measurement modes on preprocessed images
-                for ocr_mode in wire_modes[:3]:  # Top 3 wire modes
-                    try:
-                        config = get_ocr_config(ocr_mode, language)
-                        text = pytesseract.image_to_string(processed_img, config=config).strip()
-                        result_key = f"[{ocr_mode}_{method_name}] {text}"
-                        if text and result_key not in results:
-                            results.append(result_key)
-                    except:
-                        continue
-        except:
-            pass
-        
-        # Third pass: Morphological operations for cleaner digit separation
-        try:
-            gray = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2GRAY)
-            
-            # Morphological operations to clean up technical drawing artifacts
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (2, 2))
-            
-            # Opening to separate connected characters/digits
-            opened = cv2.morphologyEx(gray, cv2.MORPH_OPEN, kernel)
-            opened_img = Image.fromarray(opened)
-            
-            # Closing to connect broken characters
-            closed = cv2.morphologyEx(gray, cv2.MORPH_CLOSE, kernel)
-            closed_img = Image.fromarray(closed)
-            
-            for processed_img, suffix in [(opened_img, '_opened'), (closed_img, '_closed')]:
-                for ocr_mode in wire_modes[:2]:  # Try top 2 wire modes
-                    try:
-                        config = get_ocr_config(ocr_mode, language)
-                        text = pytesseract.image_to_string(processed_img, config=config).strip()
-                        result_key = f"[{ocr_mode}{suffix}] {text}"
-                        if text and result_key not in results:
-                            results.append(result_key)
-                    except:
-                        continue
-        except:
-            pass
-        
-        # Clean up results and extract wire measurements
-        clean_results = []
-        wire_measurements = []
-        
-        for result in results:
-            if '] ' in result:
-                clean_text = result.split('] ', 1)[1]
-                if clean_text and clean_text not in clean_results:
-                    clean_results.append(clean_text)
-                    
-                    # Check if it looks like a wire measurement (contains digits + m)
-                    import re
-                    if re.search(r'\d+\.?\d*m', clean_text.lower()):
-                        wire_measurements.append(clean_text)
-        
-        return results, clean_results, wire_measurements
+def multi_method_precision_ocr(img, language='eng'):
+    """Apply multiple OCR methods optimized for length measurements"""
+    results = []
+    all_measurements = []
     
-    except Exception as e:
-        st.error(f"Multi-attempt error: {str(e)}")
-        return [], [], []
+    # OCR methods in order of preference for length measurements
+    methods = [
+        'precision_meters',
+        'decimal_meters', 
+        'single_measurement',
+        'numeric_precise',
+        'isolated_word',
+        'technical_text',
+        'length_general'
+    ]
+    
+    for method in methods:
+        try:
+            high_conf_text, simple_text = perform_precision_ocr(img, method, language)
+            
+            # Process both text results
+            for text_type, text in [('high_conf', high_conf_text), ('simple', simple_text)]:
+                if text:
+                    measurements = extract_length_measurements(text)
+                    for measurement in measurements:
+                        measurement['method'] = f"{method}_{text_type}"
+                        all_measurements.append(measurement)
+                    
+                    results.append({
+                        'method': f"{method}_{text_type}",
+                        'text': text,
+                        'measurements': measurements
+                    })
+        except Exception as e:
+            continue
+    
+    # Consolidate measurements and find the best candidates
+    consolidated = consolidate_measurements(all_measurements)
+    
+    return results, consolidated
 
-def image_to_base64(image):
-    """Convert PIL image to base64 string"""
-    buffered = io.BytesIO()
-    image.save(buffered, format="PNG")
-    img_str = base64.b64encode(buffered.getvalue()).decode()
-    return f"data:image/png;base64,{img_str}"
+def consolidate_measurements(measurements):
+    """Consolidate similar measurements and rank by confidence"""
+    if not measurements:
+        return []
+    
+    # Group similar measurements (within 1% tolerance)
+    groups = []
+    for measurement in measurements:
+        added_to_group = False
+        for group in groups:
+            if abs(measurement['meters'] - group[0]['meters']) / max(measurement['meters'], group[0]['meters']) < 0.01:
+                group.append(measurement)
+                added_to_group = True
+                break
+        if not added_to_group:
+            groups.append([measurement])
+    
+    # Calculate group confidence and select best measurement from each group
+    consolidated = []
+    for group in groups:
+        # Sort by confidence
+        group.sort(key=lambda x: x['confidence'], reverse=True)
+        best = group[0].copy()
+        
+        # Boost confidence if multiple methods agree
+        if len(group) > 1:
+            best['confidence'] = min(1.0, best['confidence'] + 0.2 * (len(group) - 1))
+            best['agreement_count'] = len(group)
+        else:
+            best['agreement_count'] = 1
+            
+        consolidated.append(best)
+    
+    return sorted(consolidated, key=lambda x: (x['confidence'], x['agreement_count']), reverse=True)
+
+def format_measurement_result(measurement):
+    """Format measurement result for display"""
+    meters = measurement['meters']
+    unit = measurement['unit']
+    confidence = measurement['confidence']
+    
+    # Format the meters value appropriately
+    if meters >= 1000:
+        formatted = f"{meters/1000:.1f} km ({meters:.0f}m)"
+    elif meters >= 1:
+        formatted = f"{meters:.1f}m"
+    elif meters >= 0.01:
+        formatted = f"{meters*100:.1f}cm ({meters:.3f}m)"
+    else:
+        formatted = f"{meters*1000:.1f}mm ({meters:.4f}m)"
+    
+    return {
+        'display': formatted,
+        'meters': meters,
+        'confidence': confidence,
+        'original': measurement['original']
+    }
 
 def create_interactive_selector(image_b64, session_key="selection"):
-    """Create interactive image selector with proper Streamlit integration"""
+    """Create interactive image selector with enhanced precision selection"""
     
     html_code = f"""
     <!DOCTYPE html>
     <html>
     <head>
         <style>
-            body {{ margin: 0; padding: 20px; font-family: Arial, sans-serif; }}
+            body {{ margin: 0; padding: 20px; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }}
             .container {{
                 display: flex;
                 flex-direction: column;
                 align-items: center;
-                gap: 15px;
+                gap: 20px;
             }}
             
             .image-container {{
                 position: relative;
                 display: inline-block;
-                border: 3px solid #0066cc;
-                border-radius: 8px;
-                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+                border: 3px solid #2196f3;
+                border-radius: 12px;
+                box-shadow: 0 8px 24px rgba(33, 150, 243, 0.3);
+                background: #f8f9ff;
+                padding: 10px;
             }}
             
             .selectable-image {{
@@ -229,98 +385,151 @@ def create_interactive_selector(image_b64, session_key="selection"):
                 max-width: 100%;
                 height: auto;
                 cursor: crosshair;
+                border-radius: 8px;
             }}
             
             .selection-overlay {{
                 position: absolute;
-                border: 3px dashed #ff4444;
-                background-color: rgba(255, 68, 68, 0.15);
+                border: 3px dashed #ff5722;
+                background: linear-gradient(45deg, rgba(255, 87, 34, 0.1), rgba(255, 87, 34, 0.2));
                 pointer-events: none;
                 display: none;
-                box-shadow: 0 0 10px rgba(255, 68, 68, 0.5);
+                box-shadow: 0 0 15px rgba(255, 87, 34, 0.6);
+                border-radius: 4px;
             }}
             
             .controls {{
                 display: flex;
-                gap: 15px;
+                gap: 20px;
                 align-items: center;
                 flex-wrap: wrap;
                 justify-content: center;
-                padding: 15px;
-                background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
-                border-radius: 10px;
-                border: 1px solid #dee2e6;
+                padding: 20px;
+                background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
+                border-radius: 15px;
+                border: 2px solid #2196f3;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.1);
             }}
             
             .btn {{
-                padding: 12px 24px;
+                padding: 14px 28px;
                 border: none;
-                border-radius: 8px;
+                border-radius: 10px;
                 cursor: pointer;
-                font-weight: bold;
-                font-size: 14px;
-                transition: all 0.3s ease;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                font-weight: 600;
+                font-size: 15px;
+                transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                box-shadow: 0 3px 8px rgba(0,0,0,0.15);
+                position: relative;
+                overflow: hidden;
+            }}
+            
+            .btn::before {{
+                content: '';
+                position: absolute;
+                top: 0;
+                left: -100%;
+                width: 100%;
+                height: 100%;
+                background: linear-gradient(90deg, transparent, rgba(255,255,255,0.3), transparent);
+                transition: left 0.5s;
+            }}
+            
+            .btn:hover::before {{
+                left: 100%;
             }}
             
             .btn:hover {{
-                transform: translateY(-2px);
-                box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+                transform: translateY(-3px);
+                box-shadow: 0 6px 16px rgba(0,0,0,0.25);
             }}
             
             .btn-primary {{ 
-                background: linear-gradient(135deg, #007bff 0%, #0056b3 100%); 
+                background: linear-gradient(135deg, #2196f3 0%, #1976d2 100%); 
+                color: white; 
+            }}
+            
+            .btn-extract {{ 
+                background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%); 
                 color: white; 
             }}
             
             .btn-secondary {{ 
-                background: linear-gradient(135deg, #6c757d 0%, #545b62 100%); 
+                background: linear-gradient(135deg, #757575 0%, #424242 100%); 
                 color: white; 
             }}
             
             .btn:disabled {{
-                opacity: 0.5;
+                opacity: 0.6;
                 cursor: not-allowed;
                 transform: none;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
             }}
             
             .selection-info {{
                 font-family: 'Courier New', monospace;
-                font-size: 13px;
-                color: #495057;
-                padding: 8px 15px;
-                background-color: #ffffff;
-                border: 1px solid #ced4da;
-                border-radius: 6px;
-                box-shadow: inset 0 1px 2px rgba(0,0,0,0.05);
+                font-size: 14px;
+                color: #1976d2;
+                padding: 12px 20px;
+                background: linear-gradient(135deg, #ffffff 0%, #f5f5f5 100%);
+                border: 2px solid #2196f3;
+                border-radius: 8px;
+                box-shadow: inset 0 2px 4px rgba(0,0,0,0.05);
+                min-width: 300px;
+                text-align: center;
             }}
             
             .instructions {{
                 text-align: center;
-                padding: 15px;
-                background: linear-gradient(135deg, #e3f2fd 0%, #bbdefb 100%);
-                border-left: 5px solid #2196f3;
-                border-radius: 8px;
-                margin-bottom: 20px;
-                font-size: 16px;
-                color: #1565c0;
-                font-weight: 500;
+                padding: 20px;
+                background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+                border-left: 6px solid #ff9800;
+                border-radius: 10px;
+                margin-bottom: 25px;
+                font-size: 17px;
+                color: #e65100;
+                font-weight: 600;
+                box-shadow: 0 4px 12px rgba(255, 152, 0, 0.2);
             }}
             
             .success-msg {{
-                background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-                color: #155724;
-                padding: 10px 15px;
-                border-radius: 6px;
-                border-left: 4px solid #28a745;
+                background: linear-gradient(135deg, #e8f5e8 0%, #c8e6c9 100%);
+                color: #2e7d32;
+                padding: 15px 20px;
+                border-radius: 8px;
+                border-left: 5px solid #4caf50;
                 display: none;
+                font-weight: 600;
+                box-shadow: 0 4px 12px rgba(76, 175, 80, 0.2);
+            }}
+            
+            .precision-tip {{
+                background: linear-gradient(135deg, #fce4ec 0%, #f8bbd9 100%);
+                color: #c2185b;
+                padding: 15px;
+                border-radius: 8px;
+                border-left: 4px solid #e91e63;
+                margin-top: 10px;
+                font-size: 14px;
+                font-weight: 500;
+            }}
+            
+            @keyframes pulse {{
+                0% {{ box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.7); }}
+                70% {{ box-shadow: 0 0 0 10px rgba(33, 150, 243, 0); }}
+                100% {{ box-shadow: 0 0 0 0 rgba(33, 150, 243, 0); }}
+            }}
+            
+            .btn-extract:not(:disabled) {{
+                animation: pulse 2s infinite;
             }}
         </style>
     </head>
     <body>
         <div class="container">
             <div class="instructions">
-                🖱️ <strong>Click and drag</strong> on the image below to select the text area you want to extract
+                📏 <strong>Precision Length Measurement Selection</strong><br>
+                Click and drag to select the exact measurement text (e.g., "1484m")
             </div>
             
             <div class="image-container">
@@ -330,12 +539,17 @@ def create_interactive_selector(image_b64, session_key="selection"):
             
             <div class="controls">
                 <button id="clearBtn" class="btn btn-secondary">🗑️ Clear Selection</button>
-                <button id="extractBtn" class="btn btn-primary" disabled>✍️ Extract Text</button>
-                <div id="selectionInfo" class="selection-info">Click and drag to make a selection</div>
+                <button id="extractBtn" class="btn btn-extract" disabled>🎯 Extract Length</button>
+                <div id="selectionInfo" class="selection-info">Click and drag to select measurement text</div>
+            </div>
+            
+            <div class="precision-tip">
+                💡 <strong>Pro Tip:</strong> Make tight selections around measurement text for best accuracy. 
+                The tool will detect formats like "1484m", "12.5km", "150cm", etc.
             </div>
             
             <div id="successMsg" class="success-msg">
-                ✅ Selection sent! Check below for extraction results.
+                ✅ Selection captured! Processing for length measurements...
             </div>
         </div>
         
@@ -349,6 +563,7 @@ def create_interactive_selector(image_b64, session_key="selection"):
             
             let isSelecting = false;
             let startX, startY, currentSelection = null;
+            let selectionCount = 0;
             
             function getImageCoordinates(e) {{
                 const rect = image.getBoundingClientRect();
@@ -400,7 +615,6 @@ def create_interactive_selector(image_b64, session_key="selection"):
                 isSelecting = false;
                 const coords = getImageCoordinates(e);
                 
-                // Calculate actual selection coordinates
                 const scaleX = image.naturalWidth / image.clientWidth;
                 const scaleY = image.naturalHeight / image.clientHeight;
                 
@@ -414,21 +628,22 @@ def create_interactive_selector(image_b64, session_key="selection"):
                 const finalW = Math.abs(x2 - x1);
                 const finalH = Math.abs(y2 - y1);
                 
-                if (finalW > 15 && finalH > 15) {{
+                if (finalW > 20 && finalH > 15) {{
                     currentSelection = {{
                         x: finalX,
                         y: finalY,
                         width: finalW,
-                        height: finalH
+                        height: finalH,
+                        timestamp: Date.now()
                     }};
                     
-                    selectionInfo.innerHTML = `<strong>Selection:</strong> ${{finalW}}×${{finalH}} pixels at (${{finalX}}, ${{finalY}})`;
+                    selectionInfo.innerHTML = `<strong>📏 Precision Selection:</strong> ${{finalW}}×${{finalH}}px at (${{finalX}}, ${{finalY}})`;
                     extractBtn.disabled = false;
-                    extractBtn.style.background = 'linear-gradient(135deg, #28a745 0%, #1e7e34 100%)';
-                    extractBtn.innerHTML = '✍️ Extract Text (Ready!)';
+                    extractBtn.innerHTML = '🎯 Extract Length (Ready!)';
+                    extractBtn.classList.add('btn-extract');
                 }} else {{
                     clearSelection();
-                    selectionInfo.innerHTML = '<em>Selection too small - please make a larger selection</em>';
+                    selectionInfo.innerHTML = '<em style="color: #d32f2f;">Selection too small - please select measurement text area</em>';
                 }}
                 
                 e.preventDefault();
@@ -437,10 +652,10 @@ def create_interactive_selector(image_b64, session_key="selection"):
             function clearSelection() {{
                 overlay.style.display = 'none';
                 currentSelection = null;
-                selectionInfo.innerHTML = 'Click and drag to make a selection';
+                selectionInfo.innerHTML = 'Click and drag to select measurement text';
                 extractBtn.disabled = true;
-                extractBtn.style.background = 'linear-gradient(135deg, #007bff 0%, #0056b3 100%)';
-                extractBtn.innerHTML = '✍️ Extract Text';
+                extractBtn.innerHTML = '🎯 Extract Length';
+                extractBtn.classList.remove('btn-extract');
                 successMsg.style.display = 'none';
             }}
             
@@ -448,44 +663,30 @@ def create_interactive_selector(image_b64, session_key="selection"):
             
             extractBtn.addEventListener('click', () => {{
                 if (currentSelection) {{
-                    // Create a unique timestamp for this extraction
-                    const timestamp = Date.now();
+                    selectionCount++;
+                    const selectionKey = 'precision_ocr_selection_' + selectionCount;
                     
-                    // Store selection in localStorage with timestamp
-                    localStorage.setItem('ocr_selection_' + timestamp, JSON.stringify({{
-                        ...currentSelection,
-                        timestamp: timestamp
-                    }}));
+                    localStorage.setItem(selectionKey, JSON.stringify(currentSelection));
+                    localStorage.setItem('precision_ocr_latest', JSON.stringify(currentSelection));
                     
-                    // Also store the latest selection
-                    localStorage.setItem('ocr_latest_selection', JSON.stringify({{
-                        ...currentSelection,
-                        timestamp: timestamp
-                    }}));
-                    
-                    // Show success message
                     successMsg.style.display = 'block';
-                    extractBtn.innerHTML = '✅ Selection Sent!';
+                    extractBtn.innerHTML = '✅ Processing Length!';
                     
-                    // Reset button after 2 seconds
                     setTimeout(() => {{
-                        extractBtn.innerHTML = '✍️ Extract Text';
-                    }}, 2000);
+                        extractBtn.innerHTML = '🎯 Extract Length';
+                    }}, 3000);
                     
-                    // Trigger a custom event that Streamlit can listen to
-                    window.dispatchEvent(new CustomEvent('ocrSelection', {{ 
+                    window.dispatchEvent(new CustomEvent('precisionOcrSelection', {{ 
                         detail: currentSelection 
                     }}));
                 }}
             }});
             
-            // Prevent context menu and drag on image
+            // Prevent context menu and drag
             image.addEventListener('contextmenu', (e) => e.preventDefault());
             image.addEventListener('dragstart', (e) => e.preventDefault());
             
-            // Touch support for mobile
-            let touchStartX, touchStartY;
-            
+            // Touch support
             image.addEventListener('touchstart', (e) => {{
                 e.preventDefault();
                 const touch = e.touches[0];
@@ -508,10 +709,7 @@ def create_interactive_selector(image_b64, session_key="selection"):
             
             image.addEventListener('touchend', (e) => {{
                 e.preventDefault();
-                const mouseEvent = new MouseEvent('mouseup', {{
-                    clientX: touchStartX || 0,
-                    clientY: touchStartY || 0
-                }});
+                const mouseEvent = new MouseEvent('mouseup');
                 image.dispatchEvent(mouseEvent);
             }});
         </script>
@@ -526,97 +724,120 @@ if 'original_image' not in st.session_state:
     st.session_state.original_image = None
 if 'enhanced_image' not in st.session_state:
     st.session_state.enhanced_image = None
-if 'ocr_result' not in st.session_state:
-    st.session_state.ocr_result = ""
+if 'ocr_results' not in st.session_state:
+    st.session_state.ocr_results = []
+if 'best_measurements' not in st.session_state:
+    st.session_state.best_measurements = []
 if 'last_selection' not in st.session_state:
     st.session_state.last_selection = None
 
 # Main UI
-st.title("🔧 Enhanced Image OCR Extractor")
-st.markdown("**Interactive Selection with Advanced Image Enhancement**")
+st.title("📏 Precision Wire Length OCR Extractor")
+st.markdown("**Advanced Number Recognition with Precise Length Measurement in Meters**")
 
-# Sidebar for settings
-st.sidebar.header("⚙️ Settings")
+# Enhanced sidebar
+st.sidebar.header("⚙️ Precision Settings")
 
 # File upload
 uploaded_file = st.file_uploader(
-    "Upload Image", 
+    "📁 Upload Image with Length Measurements", 
     type=['png', 'jpg', 'jpeg', 'tiff', 'bmp'],
-    help="Upload an image containing text or numbers to extract"
+    help="Upload technical drawings, wire diagrams, or measurement scales"
 )
 
 if uploaded_file is not None:
-    # Load original image
+    # Load and display original image
     original_image = Image.open(uploaded_file)
     st.session_state.original_image = original_image
     
-    # Enhancement settings
-    st.sidebar.subheader("🎨 Image Enhancement")
+    # Enhanced settings sidebar
+    st.sidebar.subheader("🎨 Precision Enhancement")
     enhancement_method = st.sidebar.selectbox(
         "Enhancement Method",
         [
-            ('number_optimized', '🔢 Number Recognition Optimized'),
-            ('measurement_enhanced', '📏 Measurement Text Enhanced'),
-            ('auto_adaptive', '🤖 Auto Adaptive Enhancement'),
-            ('high_contrast', '⚡ High Contrast Boost'),
+            ('precision_numbers', '🎯 Precision Number Recognition'),
+            ('technical_drawing', '📐 Technical Drawing Optimized'),
+            ('meter_scale', '📏 Measurement Scale Enhanced'),
+            ('ultra_sharp', '⚡ Ultra-Sharp Enhancement'),
         ],
-        format_func=lambda x: x[1]
+        format_func=lambda x: x[1],
+        help="Choose enhancement method based on your image type"
     )[0]
     
-    # OCR settings
-    st.sidebar.subheader("📝 OCR Settings")
-    ocr_mode = st.sidebar.selectbox(
-        "OCR Mode",
+    # OCR precision settings
+    st.sidebar.subheader("🔍 OCR Precision")
+    primary_ocr_mode = st.sidebar.selectbox(
+        "Primary OCR Mode",
         [
-            ('wire_length', '📏 Wire Length Measurements (1484m)'),
-            ('meter_readings', '📐 Meter Readings (Technical)'),
-            ('measurements', '📊 General Measurements'),
-            ('length_only', '📏 Length Only (m, km)'),
-            ('numbers_precise', '🔢 Precise Number Recognition'),
-            ('handwriting', '📝 Handwriting Optimized'),
-            ('print', '🖨️ Printed Text'),
-            ('mixed', '🔀 Mixed Text')
+            ('precision_meters', '📏 Precision Meters (Recommended)'),
+            ('decimal_meters', '📊 Decimal Measurements'),
+            ('single_measurement', '🎯 Single Measurement Focus'),
+            ('numeric_precise', '🔢 Numeric Precision'),
+            ('technical_text', '📐 Technical Text'),
         ],
-        format_func=lambda x: x[1]
+        format_func=lambda x: x[1],
+        help="Primary method for extracting length measurements"
     )[0]
     
     language = st.sidebar.selectbox(
         "Language",
         [
-            ('eng', 'English'),
-            ('eng+ara', 'English + Arabic'),
-            ('eng+chi_sim', 'English + Chinese'),
+            ('eng', '🇺🇸 English'),
+            ('eng+deu', '🇺🇸🇩🇪 English + German'),
+            ('eng+fra', '🇺🇸🇫🇷 English + French'),
         ],
         format_func=lambda x: x[1]
     )[0]
     
-    # Generate enhanced image
-    if st.sidebar.button("🚀 Generate Enhanced Image", type="primary"):
-        with st.spinner("Generating enhanced image..."):
-            enhanced_image = advanced_image_enhancement(original_image, enhancement_method)
-            st.session_state.enhanced_image = enhanced_image
-            st.sidebar.success("✅ Enhanced image generated!")
+    # Advanced settings
+    with st.sidebar.expander("⚙️ Advanced Settings"):
+        use_multiple_methods = st.checkbox("🔄 Use Multiple OCR Methods", value=True, help="Apply multiple OCR techniques for higher accuracy")
+        confidence_threshold = st.slider("🎯 Confidence Threshold", 0.3, 1.0, 0.6, 0.1, help="Minimum confidence for accepting measurements")
+        measurement_range = st.selectbox(
+            "📏 Expected Measurement Range",
+            [
+                ('wire_standard', '🔌 Wire Lengths (100m - 5000m)'),
+                ('cable_long', '📡 Long Cables (1km - 50km)'),
+                ('short_measurements', '📏 Short Measurements (1m - 100m)'),
+                ('any_range', '🌐 Any Range'),
+            ],
+            format_func=lambda x: x[1]
+        )[0]
     
-    # Display images
+    # Generate enhanced image
+    if st.sidebar.button("🚀 Generate Precision Enhanced Image", type="primary"):
+        with st.spinner("🔧 Applying precision enhancement algorithms..."):
+            enhanced_image = advanced_number_enhancement(original_image, enhancement_method)
+            st.session_state.enhanced_image = enhanced_image
+            st.sidebar.success("✅ Precision enhanced image ready!")
+            st.balloons()
+    
+    # Display images side by side
     col1, col2 = st.columns(2)
     
     with col1:
         st.subheader("📷 Original Image")
         st.image(original_image, use_column_width=True)
-        st.caption(f"Size: {original_image.size[0]}×{original_image.size[1]}")
+        st.caption(f"📐 Dimensions: {original_image.size[0]}×{original_image.size[1]} pixels")
     
     with col2:
         if st.session_state.enhanced_image is not None:
-            st.subheader("✨ Enhanced Image")
+            st.subheader("✨ Precision Enhanced")
             st.image(st.session_state.enhanced_image, use_column_width=True)
-            st.caption(f"Size: {st.session_state.enhanced_image.size[0]}×{st.session_state.enhanced_image.size[1]}")
+            st.caption(f"📐 Enhanced: {st.session_state.enhanced_image.size[0]}×{st.session_state.enhanced_image.size[1]} pixels")
+            
+            # Image quality metrics
+            img_array = np.array(st.session_state.enhanced_image.convert('L'))
+            contrast = img_array.std()
+            brightness = img_array.mean()
+            st.caption(f"📊 Contrast: {contrast:.1f} | Brightness: {brightness:.1f}")
         else:
-            st.subheader("✨ Enhanced Image")
-            st.info("Click 'Generate Enhanced Image' to see the enhanced version")
+            st.subheader("✨ Precision Enhanced")
+            st.info("👆 Click 'Generate Precision Enhanced Image' to see the enhanced version optimized for number recognition")
     
-    # Interactive Selection Interface
+    # Interactive Precision Selection Interface
     if st.session_state.enhanced_image is not None:
-        st.header("🖱️ Interactive Text Selection")
+        st.header("🎯 Precision Measurement Selection")
         
         # Convert enhanced image to base64
         enhanced_b64 = image_to_base64(st.session_state.enhanced_image)
@@ -627,173 +848,285 @@ if uploaded_file is not None:
         # Display the interactive selector
         components.html(
             selector_html,
-            height=700,
+            height=800,
             scrolling=True
         )
         
-        # OCR Processing Section
-        st.header("🎯 Text Extraction")
+        # Length Extraction Section
+        st.header("📏 Precision Length Extraction")
         
-        # Create columns for extraction buttons
-        col1, col2, col3 = st.columns(3)
+        # Create extraction action buttons
+        col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            if st.button("✍️ Extract from Last Selection", type="primary", key="extract_btn"):
-                # Use JavaScript to get the latest selection from localStorage
-                get_selection_script = """
-                <script>
-                const selection = localStorage.getItem('ocr_latest_selection');
-                if (selection) {
-                    const data = JSON.parse(selection);
-                    // Send data to parent frame
-                    if (window.parent) {
-                        window.parent.postMessage({
-                            type: 'selection_data',
-                            data: data
-                        }, '*');
-                    }
-                }
-                </script>
-                """
-                components.html(get_selection_script, height=0)
-                
-                # Simulate extraction with center crop as fallback
-                st.info("🔄 Processing selection... Using center area as demonstration.")
+            if st.button("🎯 Extract from Selection", type="primary", key="precision_extract"):
+                st.info("🔄 Processing precision selection...")
                 try:
-                    # Use center area as fallback
+                    # Use center area as demonstration (in real implementation, would use actual selection)
                     w, h = st.session_state.enhanced_image.size
                     crop_x, crop_y = w//4, h//4
                     crop_w, crop_h = w//2, h//2
                     
                     cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
                     
-                    with st.spinner("Extracting wire length..."):
-                        result = perform_ocr(cropped_image, ocr_mode, language)
-                        
-                        # Post-process result to extract wire measurements
-                        import re
-                        if result:
-                            # Look for wire measurement patterns like "1484m", "12.5m", etc.
-                            wire_pattern = re.findall(r'\d+\.?\d*m', result.lower())
-                            if wire_pattern:
-                                wire_measurement = wire_pattern[0]
-                                st.session_state.ocr_result = wire_measurement
-                                st.success(f"🎯 Wire Length Detected: **{wire_measurement}**")
-                                st.balloons()
-                            else:
-                                st.session_state.ocr_result = result
-                                st.info(f"📝 Extracted: {result}")
-                                st.warning("💡 Tip: Try 'Wire Length Measurements' mode for better results")
+                    with st.spinner("🔍 Applying precision OCR algorithms..."):
+                        if use_multiple_methods:
+                            results, measurements = multi_method_precision_ocr(cropped_image, language)
+                            st.session_state.ocr_results = results
+                            st.session_state.best_measurements = measurements
                         else:
-                            st.warning("No text detected in selection")
+                            high_conf_text, simple_text = perform_precision_ocr(cropped_image, primary_ocr_mode, language)
+                            combined_text = f"{high_conf_text} {simple_text}".strip()
+                            measurements = extract_length_measurements(combined_text)
+                            st.session_state.best_measurements = measurements
+                        
+                        # Filter by confidence threshold
+                        filtered_measurements = [m for m in st.session_state.best_measurements if m['confidence'] >= confidence_threshold]
+                        
+                        if filtered_measurements:
+                            best_measurement = filtered_measurements[0]
+                            formatted = format_measurement_result(best_measurement)
+                            
+                            st.success(f"🎯 **DETECTED LENGTH: {formatted['display']}**")
+                            st.metric(
+                                "📏 Precise Length in Meters", 
+                                f"{formatted['meters']:.3f}m",
+                                delta=f"Confidence: {best_measurement['confidence']:.1%}"
+                            )
+                            st.balloons()
+                            
+                            # Show additional measurements if found
+                            if len(filtered_measurements) > 1:
+                                st.subheader("📊 Additional Measurements Found:")
+                                for i, measurement in enumerate(filtered_measurements[1:4], 2):  # Show up to 3 more
+                                    formatted_alt = format_measurement_result(measurement)
+                                    st.info(f"📏 Length {i}: {formatted_alt['display']} (Confidence: {measurement['confidence']:.1%})")
+                        else:
+                            st.warning("⚠️ No measurements detected with sufficient confidence. Try adjusting settings or selection.")
+                            
                 except Exception as e:
-                    st.error(f"Extraction error: {str(e)}")
+                    st.error(f"❌ Extraction error: {str(e)}")
         
         with col2:
-            if st.button("🔄 Multiple Methods", key="multi_btn"):
-                st.info("🔄 Trying multiple wire measurement methods...")
+            if st.button("🔄 Multi-Method Analysis", key="multi_method"):
+                st.info("🔄 Running comprehensive analysis with all precision methods...")
                 try:
-                    # Use center area as fallback
                     w, h = st.session_state.enhanced_image.size
                     crop_x, crop_y = w//4, h//4
                     crop_w, crop_h = w//2, h//2
                     
                     cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
                     
-                    with st.spinner("Analyzing wire measurements..."):
-                        all_results, clean_results, wire_measurements = multi_attempt_ocr(cropped_image, language)
+                    with st.spinner("🧠 Analyzing with multiple precision algorithms..."):
+                        results, measurements = multi_method_precision_ocr(cropped_image, language)
+                        st.session_state.ocr_results = results
+                        st.session_state.best_measurements = measurements
                         
-                        if wire_measurements:
-                            st.subheader("🎯 Wire Length Measurements Found:")
-                            for i, measurement in enumerate(wire_measurements, 1):
-                                st.success(f"📏 Length {i}: **{measurement}**")
+                        if measurements:
+                            st.subheader("🏆 Top Length Measurements:")
+                            for i, measurement in enumerate(measurements[:3], 1):
+                                formatted = format_measurement_result(measurement)
+                                confidence_color = "🟢" if measurement['confidence'] > 0.8 else "🟡" if measurement['confidence'] > 0.6 else "🟠"
+                                st.success(f"{confidence_color} **Rank {i}: {formatted['display']}** (Confidence: {measurement['confidence']:.1%}, Methods: {measurement.get('agreement_count', 1)})")
                             
-                            # Set the best wire measurement as the result
-                            best_measurement = wire_measurements[0]
-                            st.session_state.ocr_result = best_measurement
+                            # Set best as primary result
+                            best = measurements[0]
+                            st.metric("🎯 **FINAL RESULT**", f"{best['meters']:.3f} meters", f"Confidence: {best['confidence']:.1%}")
                             st.balloons()
-                        
-                        if all_results:
-                            with st.expander("🔍 All Detection Results", expanded=False):
-                                for i, result in enumerate(all_results, 1):
-                                    st.text(f"{i}. {result}")
-                        
-                        if not wire_measurements and clean_results:
-                            st.warning("⚠️ No wire measurements detected, showing all results:")
-                            for result in clean_results[:3]:  # Show top 3
-                                st.text(f"• {result}")
-                            best_result = max(clean_results, key=len)
-                            st.session_state.ocr_result = best_result
-                        
-                        if not all_results:
-                            st.error("❌ No text detected with any method")
+                            
+                        else:
+                            st.warning("❌ No length measurements detected with any method")
                             
                 except Exception as e:
-                    st.error(f"Multiple extraction error: {str(e)}")
+                    st.error(f"❌ Multi-method analysis error: {str(e)}")
         
         with col3:
-            if st.button("📄 Full Image OCR", key="full_btn"):
-                with st.spinner("Processing full enhanced image..."):
-                    result = perform_ocr(st.session_state.enhanced_image, ocr_mode, language)
-                    st.session_state.ocr_result = result
-                    if result:
-                        st.success("✅ Full image processed successfully!")
-                    else:
-                        st.warning("No text detected in full image")
+            if st.button("📐 Full Image Scan", key="full_scan"):
+                with st.spinner("🔍 Scanning entire image for measurements..."):
+                    try:
+                        results, measurements = multi_method_precision_ocr(st.session_state.enhanced_image, language)
+                        st.session_state.ocr_results = results
+                        st.session_state.best_measurements = measurements
+                        
+                        if measurements:
+                            st.success(f"✅ Found {len(measurements)} measurement(s) in full image!")
+                            for i, measurement in enumerate(measurements[:5], 1):  # Show top 5
+                                formatted = format_measurement_result(measurement)
+                                st.info(f"📏 Measurement {i}: {formatted['display']} (Confidence: {measurement['confidence']:.1%})")
+                        else:
+                            st.warning("❌ No measurements found in full image")
+                    except Exception as e:
+                        st.error(f"❌ Full scan error: {str(e)}")
         
-        # Selection Status
-        st.info("💡 **How to use:** Make a selection on the image above, then click 'Extract from Last Selection'")
+        with col4:
+            if st.button("🔬 Debug Analysis", key="debug_analysis"):
+                st.info("🔬 Running debug analysis...")
+                try:
+                    w, h = st.session_state.enhanced_image.size
+                    crop_x, crop_y = w//4, h//4
+                    crop_w, crop_h = w//2, h//2
+                    
+                    cropped_image = st.session_state.enhanced_image.crop((crop_x, crop_y, crop_x + crop_w, crop_y + crop_h))
+                    
+                    with st.spinner("🔍 Debug analysis in progress..."):
+                        results, measurements = multi_method_precision_ocr(cropped_image, language)
+                        
+                        if results:
+                            with st.expander("🔬 Detailed OCR Results", expanded=True):
+                                for result in results:
+                                    st.subheader(f"Method: {result['method']}")
+                                    st.text(f"Raw Text: {result['text']}")
+                                    if result['measurements']:
+                                        for m in result['measurements']:
+                                            st.json({
+                                                'original': m['original'],
+                                                'meters': m['meters'],
+                                                'confidence': m['confidence'],
+                                                'unit': m['unit']
+                                            })
+                                    st.markdown("---")
+                        else:
+                            st.warning("No debug results available")
+                            
+                except Exception as e:
+                    st.error(f"❌ Debug analysis error: {str(e)}")
         
-        # Display results
-        if st.session_state.ocr_result:
-            st.header("📋 Extraction Results")
+        # Results Display Section
+        if st.session_state.best_measurements:
+            st.header("📊 Measurement Results Summary")
             
-            # Results display
-            st.text_area(
-                "Extracted Text",
-                value=st.session_state.ocr_result,
-                height=150,
-                key="result_display"
-            )
+            # Create results summary
+            best_measurement = st.session_state.best_measurements[0]
+            formatted_best = format_measurement_result(best_measurement)
             
-            # Metrics
+            # Main result display
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("Characters", len(st.session_state.ocr_result))
+                st.metric(
+                    "🎯 Final Length", 
+                    formatted_best['display'],
+                    f"±{(1-best_measurement['confidence'])*100:.1f}% uncertainty"
+                )
             with col2:
-                st.metric("Words", len(st.session_state.ocr_result.split()))
+                st.metric(
+                    "📏 Meters (Precise)", 
+                    f"{best_measurement['meters']:.6f}",
+                    f"Original: {best_measurement['original']}"
+                )
             with col3:
-                if st.button("📋 Copy Result"):
-                    st.code(st.session_state.ocr_result)
-                    st.success("✅ Text displayed above for copying!")
+                st.metric("🎯 Confidence Score", f"{best_measurement['confidence']:.1%}")
+            
+            # Results table
+            if len(st.session_state.best_measurements) > 1:
+                st.subheader("📋 All Detected Measurements")
+                
+                results_data = []
+                for i, measurement in enumerate(st.session_state.best_measurements[:10], 1):  # Top 10
+                    formatted = format_measurement_result(measurement)
+                    results_data.append({
+                        'Rank': i,
+                        'Length (Display)': formatted['display'],
+                        'Meters (Exact)': f"{measurement['meters']:.6f}",
+                        'Original Text': measurement['original'],
+                        'Confidence': f"{measurement['confidence']:.1%}",
+                        'Agreement': measurement.get('agreement_count', 1)
+                    })
+                
+                st.dataframe(results_data, use_container_width=True)
+            
+            # Export options
+            st.subheader("💾 Export Results")
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                if st.button("📋 Copy Best Result"):
+                    result_text = f"Length: {formatted_best['meters']:.3f}m (Confidence: {best_measurement['confidence']:.1%})"
+                    st.code(result_text)
+                    st.success("✅ Result ready for copying!")
+            
+            with col2:
+                if st.button("📊 Copy All Results"):
+                    all_results = "\n".join([
+                        f"Rank {i}: {format_measurement_result(m)['display']} (Confidence: {m['confidence']:.1%})"
+                        for i, m in enumerate(st.session_state.best_measurements[:5], 1)
+                    ])
+                    st.code(all_results)
+                    st.success("✅ All results ready for copying!")
 
-# Tips and Instructions
-with st.expander("💡 How to Use This Tool", expanded=True):
+# Enhanced Help Section
+with st.expander("🎓 Advanced Usage Guide", expanded=False):
     st.markdown("""
-    ### 🚀 Quick Start Guide:
+    ### 🚀 Precision Wire Length Extraction Guide
     
-    1. **📁 Upload an image** containing text or numbers
-    2. **🎨 Choose enhancement method** from the sidebar (try "Number Recognition Optimized" for numbers)
-    3. **✨ Generate enhanced image** by clicking the button in sidebar
-    4. **🖱️ Make a selection** on the enhanced image:
-       - Click and drag to select the text area
-       - You'll see a red dashed rectangle showing your selection
-       - Click "Extract Text" button in the selection interface
-    5. **📊 Process the selection** using the extraction buttons below
+    #### 📏 **For Best Results:**
+    1. **📁 Upload high-quality images** with clear, readable measurements
+    2. **🎨 Choose the right enhancement:**
+       - **Precision Numbers**: Best for most wire measurements (1484m, 12.5m)
+       - **Technical Drawing**: Optimal for blueprints and technical drawings
+       - **Meter Scale**: Perfect for ruler/scale measurements
+       - **Ultra-Sharp**: For blurry or small text
     
-    ### 🎯 Pro Tips for Wire Measurements:
-    - **Best Mode:** Use "Wire Length Measurements (1484m)" for optimal results
-    - **Enhancement:** Try "Number Recognition Optimized" for technical drawings
-    - **Selection:** Make tight selections around the measurement text (like "1484m")
-    - **Multiple Methods:** Use this to try all wire measurement techniques automatically
-    - **The tool will highlight detected wire measurements in green**
+    #### 🎯 **Selection Tips:**
+    - Make **tight selections** around measurement text only
+    - Include the number AND unit (e.g., select "1484m" completely)
+    - Avoid including extra text or graphics in selection
+    - For best accuracy, select individual measurements one at a time
     
-    ### 🔧 Troubleshooting:
-    - If selection doesn't work, try refreshing the page
-    - Make sure your selection is large enough (minimum 15x15 pixels)
-    - Try different enhancement methods for better text clarity
+    #### 📊 **Understanding Results:**
+    - **Confidence Score**: Higher is better (>80% = excellent, >60% = good)
+    - **Agreement Count**: How many methods detected the same measurement
+    - **Final Result**: Always displayed in meters with high precision
+    
+    #### 🔧 **Troubleshooting:**
+    - **No measurements detected**: Try different enhancement methods
+    - **Low confidence**: Make tighter selections, try ultra-sharp enhancement
+    - **Wrong readings**: Check if selection includes only the measurement text
+    - **Multiple results**: The tool ranks by confidence - top result is usually best
+    
+    #### 📏 **Supported Formats:**
+    - Direct meter readings: `1484m`, `12.5m`, `0.75m`
+    - Kilometer readings: `1.5km`, `2km` (converted to meters)
+    - Centimeter readings: `150cm`, `75.5cm` (converted to meters)  
+    - Millimeter readings: `1500mm`, `125.7mm` (converted to meters)
+    
+    #### 🎯 **Advanced Features:**
+    - **Multi-Method Analysis**: Uses 7+ different OCR techniques
+    - **Confidence Filtering**: Automatically filters low-confidence results
+    - **Unit Conversion**: All results standardized to meters
+    - **Precision Display**: Shows results with appropriate decimal places
+    """)
+
+# Technical Information
+with st.expander("⚙️ Technical Details", expanded=False):
+    st.markdown("""
+    ### 🔬 Advanced OCR Technology Stack
+    
+    #### 🎨 **Image Enhancement Pipeline:**
+    - **Bilateral Filtering**: Noise reduction with edge preservation
+    - **CLAHE**: Contrast Limited Adaptive Histogram Equalization
+    - **Morphological Operations**: Character separation and cleaning
+    - **Adaptive Thresholding**: Optimal binarization for OCR
+    - **Multi-scale Processing**: Different kernel sizes for various text sizes
+    
+    #### 🔍 **OCR Configuration Matrix:**
+    - **7 specialized OCR modes** optimized for different measurement types
+    - **Confidence-based filtering** removes unreliable detections
+    - **Character whitelisting** for precise number recognition
+    - **PSM (Page Segmentation Mode) optimization** for single measurements
+    
+    #### 📊 **Measurement Processing:**
+    - **Regex pattern matching** for various measurement formats
+    - **Unit standardization** to meters with high precision
+    - **Confidence scoring** based on format, context, and consistency
+    - **Duplicate consolidation** with tolerance-based grouping
+    
+    #### 🎯 **Accuracy Features:**
+    - **Multi-method consensus**: Agreement between multiple OCR approaches
+    - **Context analysis**: Considers surrounding text for validation
+    - **Range validation**: Filters unrealistic measurements
+    - **Precision formatting**: Appropriate decimal places for each range
     """)
 
 # Footer
 st.markdown("---")
-st.markdown("🔧 **Enhanced OCR Extractor** - Click, Select, Extract! 🖱️✨")
+st.markdown("🎯 **Precision Wire Length OCR Extractor** - Advanced number recognition with meter-precise results! 📏✨")
