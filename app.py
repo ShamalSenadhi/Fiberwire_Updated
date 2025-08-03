@@ -331,6 +331,20 @@ def consolidate_measurements(measurements):
     
     return sorted(consolidated, key=lambda x: (x['confidence'], x['agreement_count']), reverse=True)
 
+def image_to_base64(image):
+    """Convert PIL image to base64 string for HTML display"""
+    try:
+        buffered = io.BytesIO()
+        # Convert to RGB if necessary
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        image.save(buffered, format="PNG")
+        img_str = base64.b64encode(buffered.getvalue()).decode()
+        return f"data:image/png;base64,{img_str}"
+    except Exception as e:
+        st.error(f"Error converting image to base64: {str(e)}")
+        return ""
+
 def format_measurement_result(measurement):
     """Format measurement result for display"""
     meters = measurement['meters']
@@ -817,13 +831,13 @@ if uploaded_file is not None:
     
     with col1:
         st.subheader("📷 Original Image")
-        st.image(original_image, use_column_width=True)
+        st.image(original_image, use_container_width=True)
         st.caption(f"📐 Dimensions: {original_image.size[0]}×{original_image.size[1]} pixels")
     
     with col2:
         if st.session_state.enhanced_image is not None:
             st.subheader("✨ Precision Enhanced")
-            st.image(st.session_state.enhanced_image, use_column_width=True)
+            st.image(st.session_state.enhanced_image, use_container_width=True)
             st.caption(f"📐 Enhanced: {st.session_state.enhanced_image.size[0]}×{st.session_state.enhanced_image.size[1]} pixels")
             
             # Image quality metrics
