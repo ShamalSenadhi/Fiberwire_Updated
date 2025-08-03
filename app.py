@@ -920,23 +920,7 @@ if uploaded_file is not None:
         ],
         format_func=lambda x: x[1],
         help="Select the enhancement method that best matches your image type for optimal results"
-    # Method description
-    method_descriptions = {
-        'precision_numbers': "🎯 **Best for:** Sharp digital measurements, printed numbers on technical drawings",
-        'technical_drawing': "📐 **Best for:** CAD drawings, engineering blueprints, technical schematics", 
-        'meter_scale': "📏 **Best for:** Ruler measurements, measuring tape readings, scale markings",
-        'ultra_sharp': "⚡ **Best for:** Blurry images, small text, low-resolution measurements",
-        'blueprint_mode': "🔵 **Best for:** Blue/white technical blueprints, architectural drawings",
-        'handwritten_digits': "✍️ **Best for:** Hand-written measurements, field notes, manual markings",
-        'high_dpi_scan': "📋 **Best for:** High-resolution scanned documents, detailed technical papers",
-        'low_contrast_boost': "🔆 **Best for:** Faded text, low-contrast images, old documents",
-        'wire_diagram_special': "🔌 **Best for:** Electrical diagrams, wire schematics, cable layouts",
-        'measurement_tape': "📐 **Best for:** Measuring tapes, rulers with grid lines, calibrated scales", 
-        'advanced_multi_stage': "🚀 **Best for:** Complex images, multiple text types, challenging conditions"
-    }
-    
-    if enhancement_method in method_descriptions:
-        st.sidebar.info(method_descriptions[enhancement_method])
+    )[0]
     
     # OCR precision settings
     st.sidebar.subheader("🔍 OCR Precision")
